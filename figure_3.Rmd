@@ -1,0 +1,106 @@
+---
+title: "Figure 3"
+author: "Elena Wall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+
+```{r}
+library(cowplot)
+library(tidyverse)
+library(qiime2R)
+```
+
+## Including Plots
+
+
+```{r}
+myBiom <- read_qza('./data/core-div/rarefied_table.qza')
+myBiom <- as_tibble(myBiom$data, rownames = 'ASV')
+
+myMeta <- read_tsv('./data/meta_mapping.txt')
+# myMeta[-1,] and myMeta[2:nrow(myMeta)] are equivalent
+# We want to get rid of the first row which is Qiime2 bullshit.
+myMeta <- myMeta[-1,] # indexing is [row, column] 
+
+# load diversity metrics
+myShannon <- read_qza('./data/core-div/shannon_vector.qza')$data
+myFaith <- read_qza('./data/core-div/faith_pd_vector.qza')$data
+myEvenness <- read_qza('./data/core-div/evenness_vector.qza')$data
+
+myShannon <- as_tibble(myShannon, rownames = '#SampleID')
+myFaith <- as_tibble(myFaith, rownames = '#SampleID')
+myEvenness <- as_tibble(myEvenness, rownames = '#SampleID')
+```
+
+
+```{r}
+myMeta %>% 
+    left_join(myShannon) %>% 
+    left_join(myFaith) %>% 
+    left_join(myEvenness) -> myAlphas
+```
+## Antibiotic Administration and Alpha Diversity
+```{r fig.width=12, fig.height=4}
+#  mutate(abx_status = factor(abx_status, levels = c('before', 'after'), ordered = TRUE)) %>% 
+
+myAlphas %>% 
+  filter(abx_status != 'missing',
+         abx_given != 'missing') -> abx_peeps
+
+# group in the aes() function allows us to connect lines between timepoints
+# for each individual.
+# first we must create labels for our alpha divs. 
+alphaLabs <- c("Faith\nPhylogenetic\nDiversity","Evenness", "Shannon")
+names(alphaLabs) <- c("faith_pd","pielou_e","shannon")
+
+myAlphas %>%
+  mutate(day_post_abx = as.numeric(day_post_abx),
+         abx_given = str_replace(abx_given, ' ', '\n')) %>% 
+  filter(day_post_abx != is.na(day_post_abx), 
+         abx_given != "missing") %>% 
+  gather(faith_pd, shannon, pielou_e,
+         key = Alpha, value = Value) %>% 
+  ggplot(aes(x = day_post_abx, y = Value)) +
+    geom_point(aes(group = host_subject_id), size = 0.7, alpha = 0.5) +
+    geom_line(aes(group = host_subject_id), alpha = 0.3) +
+    geom_smooth(method = 'loess', se = FALSE) + 
+    geom_vline(xintercept = 0, color = 'red') +
+    facet_grid(Alpha~abx_given,
+               scales = 'free',
+               labeller = labeller(Alpha = alphaLabs)) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle=270, vjust = 0.5),
+          strip.text.y = element_text(size = 10),
+          legend.position = 'bottom',
+          axis.title.x = element_text(size = 16),
+          axis.title.y = element_text(size = 16)) +
+    xlab('Days Post Antibiotic Administration')
+  
+  
+abx_peeps %>% 
+  group_by(host_subject_id, abx_status, abx_given) %>% 
+  summarise(avg_alpha = mean(shannon)) %>% 
+  spread(abx_status, avg_alpha) %>% 
+  na.omit() %>% 
+  mutate(delta_alpha = after - before) %>% 
+  ggplot(aes(x = before, y = delta_alpha)) +
+    geom_point()
+```
+#this is nonsense
+```{r}
+
+abx_peeps %>% 
+  gather(-`#SampleID`, -experiment_title, -host_subject_id, -abx_status, -abx_given,
+         key = 'Alpha', value = 'Value') -> tidyPeeps
+tidyPeeps %>%
+  filter(grepl('faith_pd', Alpha) & grepl('shannon', Alpha) & grepl('pielou_e', Alpha)) -> tidyPeeps
+```

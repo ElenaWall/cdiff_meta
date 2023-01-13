@@ -1,0 +1,170 @@
+---
+title: "Figure 1"
+author: "Elena Wall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load in libraries
+
+```{r}
+library(broom)
+library(cowplot)
+library(ggprism)
+library(qiime2R)
+library(tidyverse)
+library(ggsignif)
+library(rstatix)
+library(ggpubr)
+library(RColorBrewer)
+library(ggpmisc)
+library(viridis)
+```
+
+## Load in data
+
+```{r}
+# load biom table
+myBiom <- read_qza('./data/core-div/rarefied_table.qza')
+myBiom <- as_tibble(myBiom$data, rownames = 'ASV')
+
+myMeta <- read_tsv('./data/meta_mapping.txt')
+# myMeta[-1,] and myMeta[2:nrow(myMeta)] are equivalent
+# We want to get rid of the first row which is Qiime2 bullshit.
+myMeta <- myMeta[-1,] # indexing is [row, column] 
+
+# load diversity metrics
+myShannon <- read_qza('./data/core-div/shannon_vector.qza')$data
+myFaith <- read_qza('./data/core-div/faith_pd_vector.qza')$data
+myEvenness <- read_qza('./data/core-div/evenness_vector.qza')$data
+
+# turn them into tibbles and create a new column because
+# tibbles don't have rownames!
+myShannon <- as_tibble(myShannon, rownames = '#SampleID')
+myFaith <- as_tibble(myFaith, rownames = '#SampleID')
+myEvenness <- as_tibble(myEvenness, rownames = '#SampleID')
+
+# load in beta diversity ordinations
+myWeightUniPcoa <-read_qza('./data/core-div/weighted_unifrac_pcoa_results.qza')$data
+myUnweightUniPcoa <-read_qza('./data/core-div/unweighted_unifrac_pcoa_results.qza')$data
+myBrayPcoa <-read_qza('./data/core-div/bray_curtis_pcoa_results.qza')$data
+myJaccardPcoa <-read_qza('./data/core-div/jaccard_pcoa_results.qza')$data
+
+weightUniProp <- myWeightUniPcoa$ProportionExplained[1:2]
+unweightUniProp <- myUnweightUniPcoa$ProportionExplained[1:2]
+
+#turn them into tibbles and stuff
+myWeightUniPcoa <- as_tibble(myWeightUniPcoa$Vectors)
+myUnweightUniPcoa <- as_tibble(myUnweightUniPcoa$Vectors)
+myBrayPcoa <- as_tibble(myBrayPcoa$Vectors)
+myJaccardPcoa <- as_tibble(myJaccardPcoa$Vectors)
+
+colnames(myWeightUniPcoa)[1] <- '#SampleID'
+colnames(myUnweightUniPcoa)[1] <- '#SampleID'
+colnames(myBrayPcoa)[1] <- '#SampleID'
+colnames(myJaccardPcoa)[1] <- '#SampleID'
+```
+
+## Merging and 'Tidying' our Alpha Diversity
+
+We want to merge our metadata and our alpha diversity metrics. We will use the tidyverse pipe %\>% (ctrl + shift + m).
+
+```{r}
+# Merges/Joins
+myMeta %>% 
+  left_join(myShannon) %>% 
+  left_join(myEvenness) %>% 
+  left_join(myFaith) -> myAlphas
+
+# Tidying
+myAlphas %>% 
+  select(`#SampleID`, experiment_title,   # cols we pivot on in line 64-65
+         shannon, faith_pd, pielou_e) %>%  # cols we are gathering in line 64-65
+  gather(-`#SampleID`, -experiment_title, 
+         key = 'Alpha', value = 'Value') -> tidyAlphas
+```
+
+## Plotting our Alpha Diversities
+
+```{r}
+tidyAlphas %>% 
+  mutate(experiment_title = str_replace(experiment_title, '_', '  '),
+         Alpha = case_when(Alpha == 'faith_pd' ~ "Faith's Phylogenetic\nDiversity",
+                           Alpha == 'pielou_e' ~ "Evenness",
+                           TRUE ~ "Shannon")) %>% 
+  ggplot(aes(y = experiment_title, x = Value)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(height = 0.1, width = 0, size = 0.95, alpha = 0.3) +
+    facet_wrap(~Alpha, scales = 'free_x') +
+    theme_bw(base_size = 18) +
+    theme(axis.text.x = element_text(size = 12,
+                                     angle = 270,
+                                     vjust = 0.5),
+          axis.text.y = element_text(size = 12)) +
+  ylab('Experiment Title') -> fig_1a
+```
+
+##Joining and plotting Beta with Alpha info
+
+```{r}
+# prepare axis labels 
+fig_1b_xaxis = paste0('PC1 (', round(unweightUniProp[1], 3) * 100, '%)')
+fig_1b_yaxis = paste0('PC2 (', round(unweightUniProp[2], 3) * 100, '%)')
+
+myUnweightUniPcoa %>% 
+  select(`#SampleID`, PC1, PC2) %>% 
+  left_join(myAlphas) -> tidyUnweightUniPcoa
+
+# convert 'missing' elements to NAs with as.numeric
+# bin the age groups into toddlers and up.
+# classify the remaining NAs as 'Age Unknown'
+tidyUnweightUniPcoa %>% 
+  mutate(age = as.numeric(age),
+         youngun = if_else(age < 2, 'Under Two', 'Over Two'),
+         youngun = if_else(is.na(youngun), 'Age Unknown', youngun)) %>% 
+  ggplot(aes(x = PC1, y = PC2)) +
+    geom_point(aes(fill = shannon),
+               pch = 21, alpha=0.8, color = 'black') +
+    scale_fill_viridis(option = 'magma') +
+    facet_wrap(~youngun) +
+    theme_bw(base_size = 18) +
+    xlab(fig_1b_xaxis) +
+    ylab(fig_1b_yaxis) -> fig_1b
+
+tidyUnweightUniPcoa %>% 
+  filter(target_subfragment != is.na(target_subfragment)) %>% 
+  ggplot(aes(x = PC1, y = PC2, fill = target_subfragment)) +
+    geom_point(pch = 21, color = 'black') +
+    xlab(fig_1b_xaxis) +
+    ylab(fig_1b_yaxis) +
+    theme_bw(base_size = 18) +
+    labs(fill = '16S Variable Region') -> fig_by_frag
+
+tidyUnweightUniPcoa %>% 
+  filter(target_subfragment != is.na(target_subfragment)) %>% 
+  ggplot(aes(x = PC1, y = PC2, fill = instrument_model)) +
+    geom_point(pch = 21, color = 'black') +
+    xlab(fig_1b_xaxis) +
+    ylab(fig_1b_yaxis) +
+    theme_bw(base_size = 18) +
+    labs(fill = 'Sequencing Platform') -> fig_by_tech
+```
+
+## Alpha, age, antibiotics
+
+```{r fig1, fig.height=7, fig.width=10}
+plot_grid(fig_1a, fig_1b,
+          nrow = 2, labels = c('a', 'b'),
+          label_size = 22,
+          rel_heights = c(1, 0.65)) -> fig_1
+
+plot_grid(fig_by_frag, fig_by_tech,
+          nrow = 2,
+          align = 'hv',
+          labels = c('a', 'b'),
+          label_size = 22) -> fig_s1
+```

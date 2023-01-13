@@ -1,0 +1,100 @@
+---
+title: "Figure 2"
+author: "Elena Wall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load in libraries
+
+```{r}
+library(cowplot)
+library(qiime2R)
+library(tidyverse)
+library(RColorBrewer)
+library(viridis)
+```
+
+## Load in data
+
+```{r}
+# load biom table
+myBiom <- read_qza('./data/core-div/rarefied_table.qza')
+myBiom <- as_tibble(myBiom$data, rownames = 'ASV')
+
+myMeta <- read_tsv('./data/meta_mapping.txt')
+# myMeta[-1,] and myMeta[2:nrow(myMeta)] are equivalent
+# We want to get rid of the first row which is Qiime2 bullshit.
+myMeta <- myMeta[-1,] # indexing is [row, column] 
+
+# load diversity metrics
+myShannon <- read_qza('./data/core-div/shannon_vector.qza')$data
+myFaith <- read_qza('./data/core-div/faith_pd_vector.qza')$data
+myEvenness <- read_qza('./data/core-div/evenness_vector.qza')$data
+
+# turn them into tibbles and create a new column because
+# tibbles don't have rownames!
+myShannon <- as_tibble(myShannon, rownames = '#SampleID')
+myFaith <- as_tibble(myFaith, rownames = '#SampleID')
+myEvenness <- as_tibble(myEvenness, rownames = '#SampleID')
+
+# load in beta diversity ordinations
+myWeightUniPcoa <-read_qza('./data/core-div/weighted_unifrac_pcoa_results.qza')$data
+myUnweightUniPcoa <-read_qza('./data/core-div/unweighted_unifrac_pcoa_results.qza')$data
+myBrayPcoa <-read_qza('./data/core-div/bray_curtis_pcoa_results.qza')$data
+myJaccardPcoa <-read_qza('./data/core-div/jaccard_pcoa_results.qza')$data
+
+weightUniProp <- myWeightUniPcoa$ProportionExplained[1:2]
+unweightUniProp <- myUnweightUniPcoa$ProportionExplained[1:2]
+
+#turn them into tibbles and stuff
+myWeightUniPcoa <- as_tibble(myWeightUniPcoa$Vectors)
+myUnweightUniPcoa <- as_tibble(myUnweightUniPcoa$Vectors)
+myBrayPcoa <- as_tibble(myBrayPcoa$Vectors)
+myJaccardPcoa <- as_tibble(myJaccardPcoa$Vectors)
+
+colnames(myWeightUniPcoa)[1] <- '#SampleID'
+colnames(myUnweightUniPcoa)[1] <- '#SampleID'
+colnames(myBrayPcoa)[1] <- '#SampleID'
+colnames(myJaccardPcoa)[1] <- '#SampleID'
+```
+
+```{r}
+myMeta %>% 
+    left_join(myShannon) %>% 
+    left_join(myFaith) %>% 
+    left_join(myEvenness) -> myAlphas
+
+myMeta %>% 
+  mutate(age = as.numeric(age),
+         youngun = if_else(age < 2, 'Under Two', 'Over Two'),
+         youngun = if_else(is.na(youngun), 'Age Unknown', youngun))
+
+myAlphas %>% 
+  select(`#SampleID`, experiment_title,   # cols we pivot on in line 64-65
+         shannon, faith_pd, pielou_e) %>%  # cols we are gathering in line 64-65
+  gather(-`#SampleID`, -experiment_title, 
+         key = 'Alpha', value = 'Value') -> tidyAlphas
+```
+
+```
+
+
+```{r}
+#  mutate(abx_status = factor(abx_status, levels = c('before', 'after'), ordered = TRUE)) %>% 
+
+
+  
+abx_peeps
+  group_by(host_subject_id, abx_status, abx_given) %>% 
+  summarise(avg_alpha = mean(shannon)) %>% 
+  spread(abx_status, avg_alpha) %>% 
+  na.omit() %>% 
+  mutate(delta_alpha = after - before) %>% 
+  ggplot(aes(x = before, y = delta_alpha)) +
+    geom_point()
+```
