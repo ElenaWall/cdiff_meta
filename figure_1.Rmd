@@ -74,7 +74,6 @@ colnames(myJaccardPcoa)[1] <- '#SampleID'
 We want to merge our metadata and our alpha diversity metrics. We will use the tidyverse pipe %\>% (ctrl + shift + m).
 
 ```{r}
-#can I do this
 # Merges/Joins
 myMeta %>% 
   left_join(myShannon) %>% 
