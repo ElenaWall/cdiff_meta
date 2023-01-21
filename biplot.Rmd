@@ -1,0 +1,155 @@
+---
+title: "Meta_biplot"
+author: "Elena Wall"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Clear things up
+```{r}
+rm(list = ls(all = TRUE))
+graphics.off()
+shell("cls")
+```
+My objective is to see the features that contribute to the variance in the different groupings. 
+-one biplot will only look at fmt status and I must perform the biplot analysis with only those samples.
+-one biplots will look at child samples and I will perform analysis only with those samples
+-the final biplot would be essentially a merge that shows top features that can be found in both biplots.
+
+load libraries
+```{r}
+library(cowplot)
+library(qiime2R)
+library(tidyverse)
+library(ggsignif)
+library(RColorBrewer)
+library(viridis)
+library(devtools)
+library(ggbiplot)
+library(stringr)
+
+```
+Load in data
+```{r}
+# load biom table
+myBiom <- read_qza('./data/core-div/rarefied_table.qza')
+myBiom <- as_tibble(myBiom$data, rownames = 'ASV')
+
+myMeta <- read_tsv('./data/Keith_metadata_mapping.tsv')
+# myMeta[-1,] and myMeta[2:nrow(myMeta)] are equivalent
+# We want to get rid of the first row which is Qiime2 bullshit.
+myMeta <- myMeta[-1,] # indexing is [row, column] 
+
+# load in beta diversity ordinations
+myWeightUniPcoa <-read_qza('./data/core-div/weighted_unifrac_pcoa_results.qza')$data
+myUnweightUniPcoa <-read_qza('./data/core-div/unweighted_unifrac_pcoa_results.qza')$data
+myBrayPcoa <-read_qza('./data/core-div/bray_curtis_pcoa_results.qza')$data
+myJaccardPcoa <-read_qza('./data/core-div/jaccard_pcoa_results.qza')$data
+
+weightUniProp <- myWeightUniPcoa$ProportionExplained[1:2]
+unweightUniProp <- myUnweightUniPcoa$ProportionExplained[1:2]
+
+#turn them into tibbles and stuff
+myWeightUniPcoa <- as_tibble(myWeightUniPcoa$Vectors)
+myUnweightUniPcoa <- as_tibble(myUnweightUniPcoa$Vectors)
+myBrayPcoa <- as_tibble(myBrayPcoa$Vectors)
+myJaccardPcoa <- as_tibble(myJaccardPcoa$Vectors)
+
+colnames(myWeightUniPcoa)[1] <- '#SampleID'
+colnames(myUnweightUniPcoa)[1] <- '#SampleID'
+colnames(myBrayPcoa)[1] <- '#SampleID'
+colnames(myJaccardPcoa)[1] <- '#SampleID'
+
+
+myBiplot5 <- read_qza('./qiime/unweighted_unifrac_biplot5.qza')
+myBiplot5Species <- as_tibble(myBiplot5$data$Species)
+myBiplot5Vectors <- as_tibble(myBiplot5$data$Vectors)
+
+
+myBiplot6 <- read_qza('./qiime/unweighted_unifrac_biplot6.qza')
+myBiplot6Species <- as_tibble(myBiplot6$data$Species)
+myBiplot6Vectors <- as_tibble(myBiplot6$data$Vectors)
+
+
+myBiplot5Species %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3", "--D_3")) ->abbrBiplot5Species
+
+
+```
+
+
+```{r}
+#gather(-PID, -HIVID, -MSM_MSW, -Gender, -HIV_Status, -Study_Cohort, -MSM_yn, key = Markers, #value = Counts) ->myCytofBloodTidy
+# prepare axis labels 
+fig_1b_xaxis = paste0('PC1 (', round(unweightUniProp[1], 3) * 100, '%)')
+fig_1b_yaxis = paste0('PC2 (', round(unweightUniProp[2], 3) * 100, '%)')
+
+
+myUnweightUniPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itUnweightUniPcoa
+
+itUnweightUniPcoa %>% 
+  left_join(myMeta) ->fullerUnweightUniPcoa
+
+fullerUnweightUniPcoa %>% 
+  filter(!fmt_status == 'missing' & !fmt_status == 'NA' & 
+           !fmt_status == 'noroviurus' & !fmt_status == 'vanco') -> fmtUnweightUniPcoa
+  
+  
+#filter(grepl('CD161+', Markers) & grepl('Va7.2+', Markers) & grepl('_CD8_', Markers))
+
+fmtUnweightUniPcoa %>% 
+  ggplot(aes(PC1,PC2)) +
+  geom_point(aes(fill = fmt_status),
+               pch = 21, alpha=0.8, color = 'black') +
+  scale_fill_brewer(palette = "Spectral")+
+    theme_bw(base_size = 18) +
+    xlab(fig_1b_xaxis) +
+    ylab(fig_1b_yaxis) +
+  ggtitle("Biplot5") -> samplePlot
+
+
+  samplePlot +
+    geom_segment(abbrBiplot5Species %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(8, a) %>% #keep 8 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) %>% # scale arrows linearly
+               aes(x=0, xend=PC1, y=0, yend=PC2, color = abbrBiplot5Species$FeatureID),
+               arrow = arrow(length = unit(0.3,"cm")))
+
+
+
+```
+code modified from Jordan Bisanz
+(https://forum.qiime2.org/t/how-to-make-pcoa-biplot-in-r-using-q2-deicode-ordination/8377/4)
+```{r}
+
+#create the base plot with only the arrows
+fmtUnweightUniPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fmtUnweightUniPcoa
+
+abbrBiplot5Species %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(8, a) %>% #keep 8 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrBiplot5SpeciesArrows # scale arrows linearly
+
+biplot5unweightUni <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_1b_xaxis) +
+    ylab(fig_1b_yaxis) +
+  ggtitle("Biplot at Taxon Level 5 by FMT status") +
+  geom_point(data = fmtUnweightUniPcoa, aes( x = PC1, y = PC2, fill = fmt_status),
+               pch = 21, alpha=0.8, color = 'black') +
+  scale_fill_brewer(palette = "Spectral")+ 
+  theme(legend.position="bottom") +  
+  geom_segment(data = abbrBiplot5SpeciesArrows, aes(x=0, xend=PC1, y=0, yend=PC2,
+                                                    color = FeatureID),
+               arrow = arrow(length = unit(0.3,"cm")))
+
+print(biplot5unweightUni)
+```
+figure out how to display taxons by arrows
