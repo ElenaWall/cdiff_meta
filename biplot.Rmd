@@ -99,7 +99,6 @@ fullerUnweightUniPcoa %>%
            !fmt_status == 'noroviurus' & !fmt_status == 'vanco') -> fmtUnweightUniPcoa
   
   
-#filter(grepl('CD161+', Markers) & grepl('Va7.2+', Markers) & grepl('_CD8_', Markers))
 
 fmtUnweightUniPcoa %>% 
   ggplot(aes(PC1,PC2)) +
@@ -143,13 +142,14 @@ biplot5unweightUni <-
     ylab(fig_1b_yaxis) +
   ggtitle("Biplot at Taxon Level 5 by FMT status") +
   geom_point(data = fmtUnweightUniPcoa, aes( x = PC1, y = PC2, fill = fmt_status),
-               pch = 21, alpha=0.8, color = 'black') +
+               pch = 21, alpha=0.3, color = 'black') +
   scale_fill_brewer(palette = "Spectral")+ 
-  theme(legend.position="bottom") +  
-  geom_segment(data = abbrBiplot5SpeciesArrows, aes(x=0, xend=PC1, y=0, yend=PC2,
-                                                    color = FeatureID),
-               arrow = arrow(length = unit(0.3,"cm")))
+  theme(legend.position="none") +  
+  geom_segment(data = abbrBiplot5SpeciesArrows, aes(x=0, xend=PC1, y=0,                               yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")))+
+  geom_text(data = abbrBiplot5SpeciesArrows, aes(x=PC1, y=PC2, label=FeatureID), size=5)
+
+
 
 print(biplot5unweightUni)
 ```
-figure out how to display taxons by arrows
