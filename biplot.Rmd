@@ -12,7 +12,6 @@ Clear things up
 ```{r}
 rm(list = ls(all = TRUE))
 graphics.off()
-shell("cls")
 ```
 My objective is to see the features that contribute to the variance in the different groupings. 
 -one biplot will only look at fmt status and I must perform the biplot analysis with only those samples.
@@ -30,9 +29,10 @@ library(viridis)
 library(devtools)
 library(ggbiplot)
 library(stringr)
+library(ggrepel)
 
 ```
-Load in data
+Load in full datasets
 ```{r}
 # load biom table
 myBiom <- read_qza('./data/core-div/rarefied_table.qza')
@@ -43,11 +43,10 @@ myMeta <- read_tsv('./data/Keith_metadata_mapping.tsv')
 # We want to get rid of the first row which is Qiime2 bullshit.
 myMeta <- myMeta[-1,] # indexing is [row, column] 
 
-# load in beta diversity ordinations
+# load in beta diversity ordinations for full 
 myWeightUniPcoa <-read_qza('./data/core-div/weighted_unifrac_pcoa_results.qza')$data
 myUnweightUniPcoa <-read_qza('./data/core-div/unweighted_unifrac_pcoa_results.qza')$data
-myBrayPcoa <-read_qza('./data/core-div/bray_curtis_pcoa_results.qza')$data
-myJaccardPcoa <-read_qza('./data/core-div/jaccard_pcoa_results.qza')$data
+
 
 weightUniProp <- myWeightUniPcoa$ProportionExplained[1:2]
 unweightUniProp <- myUnweightUniPcoa$ProportionExplained[1:2]
@@ -55,13 +54,9 @@ unweightUniProp <- myUnweightUniPcoa$ProportionExplained[1:2]
 #turn them into tibbles and stuff
 myWeightUniPcoa <- as_tibble(myWeightUniPcoa$Vectors)
 myUnweightUniPcoa <- as_tibble(myUnweightUniPcoa$Vectors)
-myBrayPcoa <- as_tibble(myBrayPcoa$Vectors)
-myJaccardPcoa <- as_tibble(myJaccardPcoa$Vectors)
 
 colnames(myWeightUniPcoa)[1] <- '#SampleID'
 colnames(myUnweightUniPcoa)[1] <- '#SampleID'
-colnames(myBrayPcoa)[1] <- '#SampleID'
-colnames(myJaccardPcoa)[1] <- '#SampleID'
 
 
 myBiplot5 <- read_qza('./qiime/unweighted_unifrac_biplot5.qza')
@@ -75,14 +70,14 @@ myBiplot6Vectors <- as_tibble(myBiplot6$data$Vectors)
 
 
 myBiplot5Species %>% 
-  mutate(FeatureID = str_replace_all(FeatureID,".*D_3", "--D_3")) ->abbrBiplot5Species
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrBiplot5Species
 
 
 ```
 
 
 ```{r}
-#gather(-PID, -HIVID, -MSM_MSW, -Gender, -HIV_Status, -Study_Cohort, -MSM_yn, key = Markers, #value = Counts) ->myCytofBloodTidy
 # prepare axis labels 
 fig_1b_xaxis = paste0('PC1 (', round(unweightUniProp[1], 3) * 100, '%)')
 fig_1b_yaxis = paste0('PC2 (', round(unweightUniProp[2], 3) * 100, '%)')
@@ -110,29 +105,24 @@ fmtUnweightUniPcoa %>%
     ylab(fig_1b_yaxis) +
   ggtitle("Biplot5") -> samplePlot
 
-
-  samplePlot +
-    geom_segment(abbrBiplot5Species %>% 
-                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
-                 top_n(8, a) %>% #keep 8 furthest away points
-                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) %>% # scale arrows linearly
-               aes(x=0, xend=PC1, y=0, yend=PC2, color = abbrBiplot5Species$FeatureID),
-               arrow = arrow(length = unit(0.3,"cm")))
-
-
+fmtUnweightUniPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fmtUnweightUniPcoa
 
 ```
 code modified from Jordan Bisanz
 (https://forum.qiime2.org/t/how-to-make-pcoa-biplot-in-r-using-q2-deicode-ordination/8377/4)
-```{r}
+
+
+```{r fig1, fig.height=7, fig.width=10}
 
 #create the base plot with only the arrows
-fmtUnweightUniPcoa %>% 
-  dplyr::rename(SampleID=`#SampleID`) -> fmtUnweightUniPcoa
+
+class(fmtUnweightUniPcoa$age)
+fmtUnweightUniPcoa$age <- as.numeric(fmtUnweightUniPcoa$age)
 
 abbrBiplot5Species %>% 
                  mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
-                 top_n(8, a) %>% #keep 8 furthest away points
+                 top_n(5, a) %>% #keep 8 furthest away points
                  mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrBiplot5SpeciesArrows # scale arrows linearly
 
 biplot5unweightUni <-
@@ -140,16 +130,281 @@ biplot5unweightUni <-
     theme_bw(base_size = 18) +
     xlab(fig_1b_xaxis) +
     ylab(fig_1b_yaxis) +
-  ggtitle("Biplot at Taxon Level 5 by FMT status") +
+  ggtitle("Biplot at Family Level by FMT status") +
   geom_point(data = fmtUnweightUniPcoa, aes( x = PC1, y = PC2, fill = fmt_status),
-               pch = 21, alpha=0.3, color = 'black') +
-  scale_fill_brewer(palette = "Spectral")+ 
-  theme(legend.position="none") +  
-  geom_segment(data = abbrBiplot5SpeciesArrows, aes(x=0, xend=PC1, y=0,                               yend=PC2),
-               arrow = arrow(length = unit(0.3,"cm")))+
-  geom_text(data = abbrBiplot5SpeciesArrows, aes(x=PC1, y=PC2, label=FeatureID), size=5)
-
+               pch = 21, alpha=1, color = 'black') +
+  scale_fill_viridis( discrete = TRUE) +
+  labs(fill = "FMT Status") +
+  theme(legend.position="bottom") + 
+  geom_segment(data = abbrBiplot5SpeciesArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")),color = 'brown2')+
+  geom_text_repel(data = abbrBiplot5SpeciesArrows, aes(x=PC1, y=PC2, label=FeatureID),size=7, color = 'brown1')
 
 
 print(biplot5unweightUni)
 ```
+
+
+```{r}
+#load in data for FMT studies
+myWeightUniFMTPcoa <-read_qza('./qiime/Elena_data/core-metrics-metaFMT-rared-1004/weighted_unifrac_pcoa_results.qza')$data
+myUnweightUniFMTPcoa <-read_qza('./qiime/Elena_data/core-metrics-metaFMT-rared-1004/unweighted_unifrac_pcoa_results.qza')$data
+
+weightUniFMTProp <- myWeightUniFMTPcoa$ProportionExplained[1:2]
+unweightUniFMTProp <- myUnweightUniFMTPcoa$ProportionExplained[1:2]
+
+#turn them into tibbles and stuff
+myWeightUniFMTPcoa <- as_tibble(myWeightUniFMTPcoa$Vectors)
+myUnweightUniFMTPcoa <- as_tibble(myUnweightUniFMTPcoa$Vectors)
+
+colnames(myWeightUniFMTPcoa)[1] <- '#SampleID'
+colnames(myUnweightUniFMTPcoa)[1] <- '#SampleID'
+
+myUnweightBiplot5FMT <- read_qza('./qiime/Elena_data/Elenas_outputs/unweighted_unifrac_FMT_biplot5.qza')
+myUnweightBiplot5FMTSpecies <- as_tibble(myUnweightBiplot5FMT$data$Species)
+myUnweightBiplot5FMTVectors <- as_tibble(myUnweightBiplot5FMT$data$Vectors)
+
+
+myWeightBiplot5FMT <- read_qza('./qiime/Elena_data/Elenas_outputs/weighted_unifrac_FMT_biplot5.qza')
+myWeightBiplot5FMTSpecies <- as_tibble(myWeightBiplot5FMT$data$Species)
+myWeightBiplot5FMTVectors <- as_tibble(myWeightBiplot5FMT$data$Vectors)
+
+myUnweightBiplot5FMTSpecies %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrunWeightBiplot5FMTSpecies
+
+myWeightBiplot5FMTSpecies %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrWeightBiplot5FMTSpecies
+
+
+```
+
+
+```{r fig2a, fig.height=7, fig.width=10}
+#WeightedFMT Biplot
+# prepare axis labels 
+
+fig_2a_xaxis = paste0('PC1 (', round(weightUniFMTProp [1], 3) * 100, '%)')
+fig_2a_yaxis = paste0('PC2 (', round(weightUniFMTProp [2], 3) * 100, '%)')
+
+
+myWeightUniFMTPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itWeightUniFMTPcoa
+
+itWeightUniFMTPcoa %>% 
+  left_join(myMeta) ->fullerWeightUniFMTPcoa
+
+fullerWeightUniFMTPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fullerWeightUniFMTPcoa
+
+#create the base plot with only the arrows
+
+abbrWeightBiplot5FMTSpecies %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(5, a) %>% #keep 8 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrWeightBiplot5FMTArrows # scale arrows linearly
+
+biplot5WeightUniFMT <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_2a_xaxis) +
+    ylab(fig_2a_yaxis) +
+  ggtitle("Weighted Biplot at Family Level FMT Subset") +
+  geom_point(data = fullerWeightUniFMTPcoa, aes( x = PC1, y = PC2, fill = fmt_status),
+               pch = 21, alpha= 1, color = 'black') +
+  scale_fill_viridis(discrete = TRUE, labels = c("Donor", "Post FMT", "Pre FMT")) +
+  labs(fill = "FMT Status") +
+  theme(legend.position="bottom") +  
+  geom_segment(data = abbrWeightBiplot5FMTArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")), color = 'brown2')+
+  geom_text_repel(data = abbrWeightBiplot5FMTArrows, aes(x=PC1, y=PC2, label=FeatureID),size=5, color = 'brown1')
+
+
+
+print(biplot5WeightUniFMT)
+```
+
+```{r fig3a, fig.height=7, fig.width=10}
+
+# Unweighted Biplot
+# prepare axis labels 
+fig_2b_xaxis = paste0('PC1 (', round(unweightUniFMTProp [1], 3) * 100, '%)')
+fig_2b_yaxis = paste0('PC2 (', round(unweightUniFMTProp [2], 3) * 100, '%)')
+
+
+myUnweightUniFMTPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itUnweightUniFMTPcoa
+
+itUnweightUniFMTPcoa %>% 
+  left_join(myMeta) ->fullerUnweightUniFMTPcoa
+
+fullerUnweightUniFMTPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fullerUnweightUniFMTPcoa
+
+#create the base plot with only the arrows
+
+abbrunWeightBiplot5FMTSpecies %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(5, a) %>% #keep 8 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrunWeightBiplot5FMTArrows # scale arrows linearly
+
+biplot5UnWeightUniFMT <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level FMT Subset") +
+  geom_point(data = fullerUnweightUniFMTPcoa, aes( x = PC1, y = PC2, fill = fmt_status),
+               pch = 21, alpha=1, color = 'black') +
+  scale_fill_viridis( direction = -1, discrete = TRUE, labels = c("Donor", "Post FMT", "Pre FMT")) +
+  labs(fill = "FMT Status") +
+  theme(legend.position="bottom") +  
+  geom_segment(data = abbrunWeightBiplot5FMTArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")),color = 'brown2')+
+  geom_text_repel(data = abbrunWeightBiplot5FMTArrows, aes(x=PC1, y=PC2, label=FeatureID),size=7,color = 'brown1' )
+
+print(biplot5UnWeightUniFMT)
+```
+
+
+
+```{r fig2a, fig.height=7, fig.width=10}
+#Weighted Healthy
+
+myWeightUniHealthyPcoa <-read_qza('./qiime/Elena_data/core-metrics-metaHealth-noNA-rared-1004/weighted_unifrac_pcoa_results.qza')$data
+
+weightUniHealthyProp <- myWeightUniHealthyPcoa$ProportionExplained[1:2]
+
+myWeightUniHealthyPcoa <- as_tibble(myWeightUniHealthyPcoa$Vectors)
+
+colnames(myWeightUniHealthyPcoa)[1] <- '#SampleID'
+
+myWeightBiplot5Healthy <- read_qza('./qiime/Elena_data/Elenas_outputs/weighted_unifrac_healthyNoNA_biplot5.qza')
+myWeightBiplot5HealthySpecies <- as_tibble(myWeightBiplot5Healthy$data$Species)
+myWeightBiplot5HealthyVectors <- as_tibble(myWeightBiplot5Healthy$data$Vectors)
+
+myWeightBiplot5HealthySpecies %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrmyWeightBiplot5HealthySpecies
+
+#prepare axis labels
+fig_3a_xaxis = paste0('PC1 (', round(weightUniHealthyProp  [1], 3) * 100, '%)')
+fig_3a_yaxis = paste0('PC2 (', round(weightUniHealthyProp  [2], 3) * 100, '%)')
+
+myWeightUniHealthyPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itWeightUniHealthyPcoa
+
+itWeightUniHealthyPcoa %>% 
+  left_join(myMeta) ->fullerWeightUniHealthyPcoa
+
+fullerWeightUniHealthyPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fullerWeightUniHealthyPcoa
+
+class(fullerWeightUniHealthyPcoa$age)
+fullerWeightUniHealthyPcoa$age <- as.numeric(fullerWeightUniHealthyPcoa$age)
+
+#create the base plot with only the arrows
+
+abbrmyWeightBiplot5HealthySpecies %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(5, a) %>% #keep 8 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrmyWeightBiplot5HealthyArrows # scale arrows linearly
+
+biplot5WeightUniHealthy <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_3a_xaxis) +
+    ylab(fig_3a_yaxis) +
+  ggtitle("Weighted Biplot at Family Level Healthy Subset") +
+  geom_point(data = fullerWeightUniHealthyPcoa, aes( x = PC1, y = PC2, fill = age),
+               pch = 21, alpha=1, color = 'black') +
+  scale_fill_viridis(direction= -1, discrete = FALSE) +
+  geom_segment(data = abbrmyWeightBiplot5HealthyArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")),color = 'brown2')+
+  geom_text_repel(data = abbrmyWeightBiplot5HealthyArrows, aes(x=PC1, y=PC2, label=FeatureID),size=5,color = 'brown1')+
+  labs(fill = "Age") +  
+  theme_bw()
+  
+print(biplot5WeightUniHealthy)
+```
+
+```{r fig3b, fig.height=7, fig.width=10}
+#Unweighted Healthy
+myUnweightUniHealthyFMTPcoa <-read_qza('./qiime/Elena_data/core-metrics-metaHealth-noNA-rared-1004/unweighted_unifrac_pcoa_results.qza')$data
+
+unweightUniHealthyProp <- myUnweightUniHealthyFMTPcoa$ProportionExplained[1:2]
+
+myUnweightUniHealthyFMTPcoa  <- as_tibble(myUnweightUniHealthyFMTPcoa$Vectors)
+
+colnames(myUnweightUniHealthyFMTPcoa)[1] <- '#SampleID'
+
+myUnweightBiplot5Healthy <- read_qza('./qiime/Elena_data/Elenas_outputs/unweighted_unifrac_healthyNoNA_biplot5.qza')
+myUnweightBiplot5HealthySpecies <- as_tibble(myUnweightBiplot5Healthy$data$Species)
+myUnweightBiplot5HealthyVectors <- as_tibble(myUnweightBiplot5Healthy$data$Vectors)
+
+myUnweightBiplot5HealthySpecies %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrUnweightBiplot5HealthySpecies
+
+#prepare axis labels
+fig_3b_xaxis = paste0('PC1 (', round(unweightUniHealthyProp  [1], 3) * 100, '%)')
+fig_3b_yaxis = paste0('PC2 (', round(unweightUniHealthyProp  [2], 3) * 100, '%)')
+
+myUnweightUniHealthyFMTPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itUnweightUniHealthyFMTPcoa
+
+itUnweightUniHealthyFMTPcoa %>% 
+  left_join(myMeta) ->fullerUnweightUniHealthyFMTPcoa
+
+fullerUnweightUniHealthyFMTPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fullerUnweightUniHealthyFMTPcoa
+
+class(fullerUnweightUniHealthyFMTPcoa$age)
+fullerUnweightUniHealthyFMTPcoa$age <- as.numeric(fullerUnweightUniHealthyFMTPcoa$age)
+
+#create the base plot with only the arrows
+
+abbrUnweightBiplot5HealthySpecies %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(5, a) %>% #keep 8 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrUnweightBiplot5HealthyArrows # scale arrows linearly
+
+biplot5UnWeightUniHealthy <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_3b_xaxis) +
+    ylab(fig_3b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Healthy Subset") +
+  geom_point(data = fullerUnweightUniHealthyFMTPcoa, aes( x = PC1, y = PC2, fill = age),
+               pch = 21, alpha=1, color = 'black') +
+  scale_fill_viridis(direction = -1,  discrete =FALSE) +
+  guides(fill =guide_colourbar(label.position = "right"))+
+  labs(fill = "Age") +
+  geom_segment(data = abbrUnweightBiplot5HealthyArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")),color = 'brown2')+
+  geom_text_repel(data = abbrUnweightBiplot5HealthyArrows, aes(x=PC1, y=PC2, label=FeatureID),size=7,color = 'brown1')
+
+print(biplot5UnWeightUniHealthy)
+```
+
+```{r fig.height=17, fig.width=20}
+plot_grid(biplot5unweightUni, biplot5UnWeightUniFMT, biplot5UnWeightUniHealthy,
+          nrow = 2, labels = c('a', 'b', 'c'),
+          label_size = 22,
+          rel_heights = c(1, 1)) -> fig_1
+
+print(fig_1)
+
+```
+
+```{r}
+library(scales)
+show_col(viridis_pal(option = "viridis")(20))
+q_colors =  3 # for no particular reason
+v_colors =  viridis(q_colors, option ="magma")
+
+#FD9A6AF, 
+```
+
+
