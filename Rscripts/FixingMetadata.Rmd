@@ -1,0 +1,91 @@
+---
+title: "Cleaner Biplot"
+author: "Elena Wall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries, may not need all of them 
+```{r}
+library(cowplot)
+library(qiime2R)
+library(tidyverse)
+library(ggsignif)
+library(viridisLite)
+library(viridis)
+library(stringr)
+library(ggrepel)
+
+```
+
+```{r}
+#The metadata file from before is so messed up, it has a lot of nonsense 0.1s and stuff, so I hopefully fixed it enough for now
+myMeta <- read_tsv('~/Lozupone/Keith/cleaned_metadata_filtered.tsv')
+#In casey's 10/6/23 email: The metadata file still contains the IBD, Norovirus, and H. pylori samples, but they should be gone from the biom table (rarefied_table_filtered_min.qza). You can #get rid of those from the metadata filtering on the doKeep​ column. 
+myMeta %>% 
+  filter(doKeep == FALSE) ->metaFiltered
+metaFiltered[1]-> samplesFiltered
+#this is keiths original metadata that has accurate ages
+originalMeta <- read_tsv('~/Lozupone/Keith/Metaanalysis/Keiths_Original_Files/meta_mapping.txt')
+colnames(originalMeta)[1] <- 'SampleID'
+#this code just looks at the different columns in casey's vs Keiths
+myMetaKept%>%
+  select(which(!(colnames(myMetaKept) %in% colnames(originalMeta)))) ->metaDiffs
+diffMetaData <- setdiff(myMeta,originalMeta)
+#now I need to just get the sampleID and days post abx column to join with caseys metadata
+originalMeta %>%
+  select(SampleID, age,day_post_abx, day_relative_to_fmt)->originalNumbers
+colnames(originalNumbers)[2] <- 'age2'
+colnames(originalNumbers)[3] <- 'day_post_abx2'
+colnames(originalNumbers)[4] <- 'day_relative_to_fmt2'
+
+myMetaKept%>%
+  left_join(originalNumbers, by="SampleID") ->myMetaNumbers
+myMetaNumbers %>% 
+  relocate(age2, .after = age) %>% 
+  relocate(day_post_abx2, .after = day_post_abx) %>% 
+  relocate(day_relative_to_fmt2, .after = day_relative_to_fmt) ->myMetaNumbers
+#it doesn't even look like I need to change ages
+extraMeta %>% 
+  select(-ends_with(".x"))-> combinedMetaMappings
+
+write_tsv(myMetaNumbers, "~/Lozupone/Keith/metaMappingEWFiltered2.tsv")
+
+
+betterMeta <- read_tsv('~/Lozupone/Keith/metaMappingEWFiltered2.tsv')
+#ok, everything is still there as it should be including the 494.E collection
+
+caseyTable <-read_qza('~/Lozupone/Keith/Metaanalysis/caseyData/rarefied_table_filtered_min.qza')$data
+t_myBiom <- t(caseyTable)
+t_myBiom[,1]->test
+#test is a named num [1:3399], so i really hope that means it is 3399 samples
+```
+
+[070725 - 070825]
+tried to load the new unweighted coa qza from core-div and found out there were only 3397 samples
+```{r}
+#ugh why is there only 3397 samples?
+myUnweightUniFullPcoa$SampleID -> PcoASamples
+myMeta$SampleID -> metaSamples
+
+setdiff(metaSamples, PcoASamples) -> ExcludedSamples
+as.data.frame(ExcludedSamples)->ExcludedSamples
+#NOOOOOO why are all the 454E samples fuckedddddddd. The table 
+#CFS014 is in excluded table and is in Meta_SS table as CES014
+#filtered-Meta_SS_table.qza has only 3397 samples
+#Meta_SS_Table.qzv has 3622 samples, so this might be how I ended Up getting the filtered table - which filtered out the 494.Es
+#Keiths original unweighted Pcoa has 3462 -> the column used to filter out "doKeep" has 63 Samples that get filtered out and they do match what is missing between the 2 core-divs
+#so I am going to need to determine what the full Meta_SS that keith has kept
+#I assured that Keiths Original dataset that he used to process his original figures was just filtering out the stuff that Casey said when looking at the new dataset I will send him (read above about 63 samples) Then I got the metadata the just has the DoKeeps and the Single Samples. I used that metaData, slightly modified (see CES014 change), to filter the feature table I got from qiime2 merging, dada-ing, tree building, classification, etc. I opened unweighted pcoa of new filltered core div, and it is 3445 like it should be!!
+diffMetaData <- setdiff(wtw,wtf)
+
+#the merged SS and metaAnalysis data was processed through qiime2 with the Sample ID CES014, so to keep that it is important to have a metadata tsv that has the correct ID
+#myMeta %>% 
+#  mutate_at('SampleID', function(x) ifelse(str_detect(x, 'CFS014'), "CES014", x))->test
+
+#write_tsv(test, "~/Lozupone/Keith/CES_SSmetaAnalysis.tsv", quote = "none")
+```

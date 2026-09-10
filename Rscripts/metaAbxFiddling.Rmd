@@ -1,0 +1,378 @@
+---
+title: "Antibiotic Meta"
+author: "Elena Wall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+load libraries, may not need all of them 
+```{r}
+library(cowplot)
+library(qiime2R)
+library(tidyverse)
+library(ggsignif)
+library(viridisLite)
+library(viridis)
+library(stringr)
+library(ggrepel)
+
+```
+
+```{r}
+#below is the file that has the accurate ages out of what Casey gave me
+myMeta <- read_tsv('Metaanalysis/caseyData/metaMappingEWFiltered1.tsv')
+
+```
+
+code modified from Jordan Bisanz
+(https://forum.qiime2.org/t/how-to-make-pcoa-biplot-in-r-using-q2-deicode-ordination/8377/4)
+
+
+```{r}
+## load in beta diversity ordination stuff for full studies
+myWeightUniFullPcoa <-read_qza('Metaanalysis/caseyData/ElenasOutputs/weighted_uni_pcoa_Full.qza')$data
+myUnweightUniFullPcoa <-read_qza('Metaanalysis/caseyData/ElenasOutputs/unweighted_uni_pcoa_Full.qza')$data
+
+#get axis info
+weightUniFullProp <- myWeightUniFullPcoa$ProportionExplained[1:2]
+unweightUniFullProp <- myUnweightUniFullPcoa$ProportionExplained[1:2]
+
+#turn them into tibbles and stuff
+myWeightUniFullPcoa <- as_tibble(myWeightUniFullPcoa$Vectors)
+myUnweightUniFullPcoa <- as_tibble(myUnweightUniFullPcoa$Vectors)
+
+colnames(myWeightUniFullPcoa)[1] <- '#SampleID'
+colnames(myUnweightUniFullPcoa)[1] <- '#SampleID'
+
+#load in biplot info origianlly performed in Qiime2
+#If you don't taxa-collapse, you'll just have to import taxonomy and make sure to Attach ASV to Taxonomy with left join or something
+#Can do Biplots on different taxonomic levels (which can change the vectors): Biplot5 is family level
+myUnweightBiplot5Full <- read_qza('Metaanalysis/caseyData/ElenasOutputs/unweighted_unifrac_Full_biplot5.qza')
+myUnweightBiplot5FullSpecies <- as_tibble(myUnweightBiplot5Full$data$Species)
+myUnweightBiplot5FullVectors <- as_tibble(myUnweightBiplot5Full$data$Vectors)
+
+
+myWeightBiplot5Full <- read_qza('Metaanalysis/caseyData/ElenasOutputs/weighted_unifrac_Full_biplot5.qza')
+myWeightBiplot5FullSpecies <- as_tibble(myWeightBiplot5Full$data$Species)
+myWeightBiplot5FullVectors <- as_tibble(myWeightBiplot5Full$data$Vectors)
+
+#This is replacing everything before and including D_3__ with nothing, then if FeatureID was described to #D_4__ I got rid of stuff before that too and replaced with space
+myUnweightBiplot5FullSpecies %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrunWeightBiplot5FullSpecies
+
+myWeightBiplot5FullSpecies %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_3__", "")) %>% 
+  mutate(FeatureID = str_replace_all(FeatureID,".*D_4__", " "))->abbrWeightBiplot5FullSpecies
+
+
+```
+
+```{r fig1a, fig.height=7, fig.width=10}
+#Weighted full Biplot
+# prepare axis labels 
+fig_2a_xaxis = paste0('PC1 (', round(weightUniFullProp [1], 3) * 100, '%)')
+fig_2a_yaxis = paste0('PC2 (', round(weightUniFullProp [2], 3) * 100, '%)')
+
+#getting rid of the bazillion other axes
+myWeightUniFullPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itWeightUniFullPcoa
+
+#adding metadata
+itWeightUniFullPcoa %>% 
+  left_join(myMeta) ->fullerWeightUniFullPcoa
+
+fullerWeightUniFullPcoa %>% 
+  dplyr::rename(SampleID=`#SampleID`) -> fullerWeightUniFullPcoa
+
+#create the base plot with only the arrows
+
+abbrWeightBiplot5FullSpecies %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(10, a) %>% #keep 10 furthest away points
+                 mutate(PC1=PC1*0.3, PC2=PC2*0.3) -> abbrWeightBiplot5FullArrows # scale arrows linearly
+
+
+biplot5WeightUniFull <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_2a_xaxis) +
+    ylab(fig_2a_yaxis) +
+  ggtitle("Weighted Biplot at Family Level Full Meta-analysis") +
+  geom_point(data = fullerWeightUniFullPcoa, aes( x = PC1, y = PC2, fill = "gray"),
+               pch = 21, alpha= 0.3, color = 'black') +
+  scale_fill_viridis(discrete = TRUE) +
+  labs(fill = "Tagetted Ribosomal Sub-fragment") +
+  theme(legend.position="bottom") +  
+  geom_segment(data = abbrWeightBiplot5FullArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               arrow = arrow(length = unit(0.3,"cm")), color = 'brown2')+
+  geom_text_repel(data = abbrWeightBiplot5FullArrows, aes(x=PC1, y=PC2, label=FeatureID),size=5, color = 'brown1')
+
+```
+
+```{r fig2a, fig.height=7, fig.width=10}
+# Unweighted Full Biplot
+# prepare axis labels 
+fig_2b_xaxis = paste0('PC1 (', round(unweightUniFullProp [1], 3) * 100, '%)')
+fig_2b_yaxis = paste0('PC2 (', round(unweightUniFullProp [2], 3) * 100, '%)')
+
+
+myUnweightUniFullPcoa %>% 
+  select('#SampleID', PC1, PC2) -> itUnweightUniFullPcoa
+
+itUnweightUniFullPcoa %>% 
+  left_join(myMeta) ->fullerUnweightUniFullPcoa
+
+#create the base plot with only the arrows
+
+abbrunWeightBiplot5FullSpecies %>% 
+                 mutate(a=sqrt(PC1^2+PC2^2)) %>% # calculate the distance from the origin
+                 top_n(10, a) %>% #keep 10 furthest away points
+                 mutate(PC1=PC1*0.5, PC2=PC2*0.5) -> abbrunWeightBiplot5FullArrows # scale arrows linearly
+
+biplot5UnWeightUniFull <-
+  ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Full Meta-analysis") +
+  geom_point(data = fullerUnweightUniFullPcoa, aes( x = PC1, y = PC2), fill = "grey", size = 3,
+               pch = 21, alpha=0.3, color = 'black') +
+  theme(legend.position="bottom") +  
+  geom_segment(data = abbrunWeightBiplot5FullArrows, aes(x=0, xend=PC1, y=0, yend=PC2),
+               lineend = "round", linejoin = "mitre",
+               arrow = arrow(length = unit(0.5,"cm")),color = 'black')+
+  geom_text_repel(data = abbrunWeightBiplot5FullArrows, aes(x=PC1, y=PC2, label=FeatureID),size=7,color = 'black' )
+
+print(biplot5UnWeightUniFull)
+
+```
+
+```{r fig2cmaybz, fig.height=7, fig.width=10}
+
+fullerUnweightUniFullPcoa$age <- as.numeric(fullerUnweightUniFullPcoa$age)
+
+# Unweighted ABX that is just showing what data looks like for different 'abx_status' variables by facet and colors by 'abx_given'. Identifying far more 'after' samples than 'before'
+fullerUnweightUniFullPcoa %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Before & After Abx") +
+  facet_wrap(~abx_status)+
+  geom_point(aes(fill = abx_given), pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", direction = -1, discrete = TRUE, na.value ="grey") +
+  labs(fill = "Abx") +
+  theme(legend.position="bottom") ->facetUnWeightUniAbx
+print(facetUnWeightUniAbx)
+
+# Unweighted ABX with 'missing' and 'NA' grey and transparent, showing what data looks like for different 'abx_given' variables by color
+fullerUnweightUniFullPcoa %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Abx Subset") +
+  geom_point(data = fullerUnweightUniFullPcoa %>% 
+               filter(abx_status == "missing" | abx_status == "NA"), fill = "grey", alpha = 0.1, pch = 21, size = 3, color = 'black') +
+      geom_point(data = fullerUnweightUniFullPcoa %>% 
+               filter(abx_status == "before" | abx_status == "after"), aes(fill = abx_given),
+               pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", discrete = TRUE) +
+  labs(fill = "Abx") +
+  theme(legend.position="bottom")
+```
+
+
+
+```{r}
+# Need to select only a few of the most drastic abxs because there is a lot of messiness with all and placebo
+# Using manuscript figure with abxs over time to identify the best days to check seems like 0 and 7
+# Unweighted PCoA facetted by ABX with 'missing' and 'NA' gone
+# Only 'placebo', vancomycin', 'clindomycin', 'CRS600', 'CRS200' were included in the paths and colored points
+#the arrows are for individual host_subject_ids at day 0 and 7 post abx, bent arrows has to do with duplicate 0DPA or 7DPA
+#
+fullerUnweightUniFullPcoa %>%
+  filter(abx_status == "missing" | abx_status == "NA" ) %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level 0-7 DPAbx Subset") +
+    facet_wrap(~abx_given) +
+    geom_path(data = fullerUnweightUniFullPcoa %>% 
+                  group_by(host_subject_id) %>% 
+                  filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+                 filter(abx_status != "missing" | abx_status != "NA" ),
+                    aes(color = host_subject_id), arrow = arrow(type = "closed", ends = "last", length = unit(0.3,"cm")), na.rm = FALSE, show.legend = FALSE)+
+      geom_point(data = fullerUnweightUniFullPcoa %>% 
+               filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+                 filter(abx_status != "missing" | abx_status != "NA" ), 
+               aes(fill = abx_status),
+               pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", discrete = TRUE) +
+  scale_color_viridis(option = "E", discrete = TRUE) +
+  labs(fill = "Abx Status") +
+  theme(legend.position="bottom") ->biplotUnWeightUniAbxStrikingFacet
+print(biplotUnWeightUniAbxStrikingFacet)
+
+# Clindo, amoxicillin, Ciprofloxacin, and 600 seem most striking
+# Not all Abxs have before and after or Day 0 and 7... 
+
+fullerUnweightUniFullPcoa %>%
+    filter(abx_status == "missing" | abx_status == "NA" ) %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Min-Max DPAbx Subset") +
+    facet_wrap(~abx_given) +
+    geom_path(data = fullerUnweightUniFullPcoa %>% 
+                  group_by(host_subject_id) %>% 
+                  filter(day_post_abx ==min(day_post_abx) |
+                        day_post_abx == max(day_post_abx)) %>% 
+                 filter(abx_status != "missing" & abx_status != "NA" ),
+                    aes(color = host_subject_id), arrow = arrow(type = "closed", ends = "last", length = unit(0.3,"cm")), na.rm = FALSE, show.legend = FALSE)+
+      geom_point(data = fullerUnweightUniFullPcoa %>% 
+               group_by(host_subject_id) %>% 
+                  filter(day_post_abx ==min(day_post_abx) |
+                        day_post_abx == max(day_post_abx)) %>% 
+                 filter(abx_status != "missing" & abx_status != "NA" ), 
+               aes(fill = abx_status),
+               pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", discrete = TRUE) +
+  scale_color_viridis(option = "E", discrete = TRUE) +
+  labs(fill = "Abx Status") +
+  theme(legend.position="bottom") ->biplotUnWeightUniAbxMaxFacet
+print(biplotUnWeightUniAbxMaxFacet)
+#just no...
+#Cipro/metro does seem to have drastic change but everything is after?
+```
+```{r}
+# want to make point that Crestone 200 disturbs things less and looks more like placebo, and 600 looks closer to other abxs
+fullerUnweightUniFullPcoa %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Crestone Comparison Subset") +
+  geom_point(data = fullerUnweightUniFullPcoa %>% 
+               filter(abx_status == "missing" | abx_status == "NA" |abx_given != "placebo"| abx_given != "vancomycin"
+                      | abx_given != "clindamycin" | abx_given != "600" | abx_given != "200"), fill = "grey", alpha = 0.1, 
+              pch = 21, size = 3, color = 'black') +  
+      geom_path(data = fullerUnweightUniFullPcoa %>% 
+                  group_by(host_subject_id) %>% 
+                  filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+                 filter(abx_given == "placebo"| abx_given == "vancomycin" | abx_given == "clindamycin" 
+                        | abx_given == "600" | abx_given == "200"),
+                    aes(group = host_subject_id, color = abx_given), arrow = arrow(type = "closed",  ends = "last"), na.rm = FALSE)+
+      geom_point(data = fullerUnweightUniFullPcoa %>% 
+               filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+                 filter(abx_given == "placebo"| abx_given == "vancomycin" | abx_given == "clindamycin" | abx_given == "600" 
+                        | abx_given == "200"), 
+               aes(fill = abx_status),
+               pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", discrete = TRUE) +
+  scale_color_viridis(option = "B", discrete = TRUE) +
+  labs(fill = "Abx Status") +
+  theme(legend.position="bottom") ->biplotUnWeightUniCrestBefAft
+print(biplotUnWeightUniCrestBefAft)
+
+```
+
+```{r}
+#Clindo, amoxicillin, Ciprofloxacin, and 600 seem most striking - lets just look at those and placebo
+fullerUnweightUniFullPcoa %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Striking Abx Subset") +
+  geom_point(data = fullerUnweightUniFullPcoa %>% 
+              filter(abx_status == "missing" | abx_status == "NA" | abx_given != "placebo"| abx_given != "amoxicillin"| abx_given != "clindamycin"| abx_given != "600" | abx_given != "Ciprofloxacin"), fill = "grey", alpha = 0.1, 
+                pch = 21, size = 3, color = 'black') +  
+  geom_path(data = fullerUnweightUniFullPcoa %>% 
+              group_by(host_subject_id) %>% 
+              filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+              filter(abx_given == "placebo"| abx_given == "600" | abx_given == "amoxicillin"| abx_given == "clindamycin"| 
+                       abx_given == "Ciprofloxacin"),
+                    aes(group = host_subject_id, color = abx_given), arrow = arrow(type = "closed", ends = "last", length = unit(0.4,"cm")), na.rm = FALSE)+
+      geom_point(data = fullerUnweightUniFullPcoa %>% 
+              filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+              filter(abx_given == "placebo"| abx_given == "600" | abx_given == "amoxicillin"|  abx_given == "clindamycin"| 
+                       abx_given == "Ciprofloxacin"), 
+                aes(fill = abx_status),
+                pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", discrete = TRUE) +
+  scale_color_viridis(option = "A", begin =.25, end = 0.75, discrete = TRUE) +
+  labs(fill = "Abx Status") +
+  theme(legend.position="bottom") ->biplotUnWeightUniAbxNarrow
+print(biplotUnWeightUniAbxNarrow)
+
+#More than one of each 0 and 7 days_post_abx, gotta figure that out
+fullerUnweightUniFullPcoa %>% 
+        group_by(host_subject_id) %>% 
+        filter(day_post_abx ==0 | day_post_abx ==7)%>% 
+        filter(abx_given == "600"| abx_given == "clindamycin"| 
+                 abx_given == "amoxicillin"| abx_given == "Ciprofloxacin" ) %>% 
+          group_by(host_subject_id)-> pathData
+#write.csv(pathData, "~/Lozupone/Keith/Metaanalysis/caseyData/filtBiplotDFbyDays.csv", quote =FALSE, row.names = FALSE)
+#Rehlman has zero timepoints that are "after"...
+#CRS seemed to collect two times before dosing...
+```
+
+
+```{r fig2c, fig.height=7, fig.width=10}
+fullerUnweightUniFullPcoa$age <- as.numeric(fullerUnweightUniFullPcoa$age)
+
+#need to eliminate the duplicate before/after timepoints
+# Rehlman has the three subjects starting at day -1, but within the first abx exposure the sample points that we have vary, so forced to kinda choose arbitrarily.
+myMeta %>% 
+    filter(abx_given == "Ciprofloxacin") ->ciproMeta
+
+myMeta %>%               
+  filter(day_post_abx == -1 |day_post_abx ==0 | day_post_abx ==3 |day_post_abx ==4 |day_post_abx ==7)%>% 
+  filter(abx_given == "600"| abx_given == "clindamycin"| abx_given == "amoxicillin"| abx_given == "Ciprofloxacin" ) %>% 
+  filter(!grepl('20212331', Description) & !grepl('20212332', Description) & !grepl('.b', Description) & !grepl('.5n', Description)& !grepl('542', Description)) %>% 
+  group_by(host_subject_id) %>% 
+  filter(day_post_abx ==min(day_post_abx) |
+           day_post_abx == max(day_post_abx))-> abxmeta
+
+
+
+fullerUnweightUniFullPcoa %>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(fig_2b_xaxis) +
+    ylab(fig_2b_yaxis) +
+  ggtitle("Unweighted Biplot at Family Level Striking Abx Subset with Min and Max DPAbx") +
+  geom_point(data = fullerUnweightUniFullPcoa, fill = "grey", alpha = 0.1, 
+                pch = 21, size = 3, color = 'black') +  
+  geom_path(data = fullerUnweightUniFullPcoa %>% 
+                filter(day_post_abx == -1 |day_post_abx ==0 | day_post_abx ==3 |day_post_abx ==4 |day_post_abx ==7)%>% 
+                filter(abx_given == "600"| abx_given == "clindamycin"| abx_given == "amoxicillin"|
+                         abx_given == "Ciprofloxacin" ) %>% 
+                filter(!grepl('20212331', Description) & !grepl('20212332', Description) &
+                         !grepl('.b', Description) & !grepl('.5n', Description) & !grepl('542', Description)) %>% 
+                  group_by(host_subject_id) %>% 
+                  filter(day_post_abx ==min(day_post_abx) |
+                          day_post_abx == max(day_post_abx)),
+                    aes(group = host_subject_id, color = abx_given), arrow = arrow(type = "closed", ends = "last", length = unit(0.4,"cm")), na.rm = FALSE)+
+      geom_point(data = fullerUnweightUniFullPcoa %>% 
+                filter(day_post_abx == -1 |day_post_abx ==0 | day_post_abx ==3 |day_post_abx ==4 |day_post_abx ==7)%>% 
+                filter(abx_given == "600"| abx_given == "clindamycin"| abx_given == "amoxicillin"| 
+                         abx_given == "Ciprofloxacin" ) %>% 
+                filter(!grepl('20212331', Description) & !grepl('20212332', Description) & 
+                         !grepl('.b', Description) & !grepl('.5n', Description) & !grepl('542', Description)) %>% 
+                  group_by(host_subject_id) %>% 
+                  filter(day_post_abx ==min(day_post_abx) |
+                        day_post_abx == max(day_post_abx)),
+                aes(fill = abx_status),
+                pch = 21, size = 3, color = 'black') +
+  scale_fill_viridis(option = "A", discrete = TRUE) +
+  scale_color_viridis(option = "A", begin =.25, end = 0.75, discrete = TRUE) +
+  labs(fill = "Abx Status") +
+  theme(legend.position="bottom") ->biplotUnWeightUniAbxStriking
+print(biplotUnWeightUniAbxStriking)
+
+# notice that there are arrows for cip that seem to get better, these are likely from Relman and could see if choosing other days post abx changes that
+```

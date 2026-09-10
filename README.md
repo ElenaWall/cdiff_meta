@@ -1,4 +1,3 @@
 # cdiff_meta
-Meta analysis of rCDI cohorts, antibiotics, infant studies
+Meta analysis of rCDI cohorts, antibiotics, infant studies, and enterotyping rCDI
 
-Also, learning how to use Git is FUN!!

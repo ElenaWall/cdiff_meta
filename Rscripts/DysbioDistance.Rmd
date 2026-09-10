@@ -1,0 +1,111 @@
+---
+title: "DysbioDistance"
+output: html_document
+date: "2026-08-31"
+---
+
+
+```{r}
+fullerunWeightUniFullPcoa<- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/  unweightedPC123withMeta.tsv")
+
+```
+
+DysbioDist Create two groups for analysis. The V1-4 group and the V5-7 group as they separate nicely on the PCoA plot
+
+```{r}
+#It looks like his metadata that is merged with the unweighted PC1 and PC2 (which is what I call 'fullerunWeightUniFullPcoa') coordinates is called "test"
+fullerunWeightUniFullPcoa <- fullerunWeightUniFullPcoa %>%
+  rename_with(tolower, starts_with("PC"))
+
+#create character vectors of V1-4 group and V5-7 group
+high <- c("V5-V7", "V6", "V5-V6", "V3-V5")
+low <- c("V3-V4","V1-V3","V4","V2","V3")
+
+#create tibbles of high and low groups
+fullerunWeightUniFullPcoa %>% 
+  filter(exp_type == "FMT" & fmt_status %in% c("donor", "PostFMT", "PreFMT") & target_subfragment %in% high)-> plot_high
+fullerunWeightUniFullPcoa %>%
+  filter(exp_type == "FMT" & fmt_status %in% c("donor", "PostFMT", "PreFMT") & target_subfragment %in% low)-> plot_low
+
+#re-leveling factors to fix colors below
+plot_high <- plot_high %>% mutate(fmt_status = fct_relevel(fmt_status, "donor", "PostFMT", "PreFMT"))
+plot_low <- plot_low %>% mutate(fmt_status = fct_relevel(fmt_status, "donor", "PostFMT", "PreFMT"))
+```
+
+Use a 2D density function to identify the peak of each group and the median PC1 and PC2 values
+
+```{r}
+temp <- c("PreFMT", "PostFMT", "donor")
+mtn_top <- function(i, y){
+  df <- y %>% filter(fmt_status == i)
+  max_2d <- MASS::kde2d(df$pc1, df$pc2, n = 100)
+  z_max <- c(which(max_2d$z == max(max_2d$z), arr.ind = TRUE))
+  x <- z_max[1]
+  y <- z_max[2]
+  pc1 <- max_2d$x[x]
+  pc2 <- max_2d$y[y]
+  c(i, pc1, pc2)
+}
+
+top_clean <- function(g, top) {  
+  x <- t(sapply(g, mtn_top, y = top))[,-1]
+  x <- as.data.frame(x, stringsAsFactors = FALSE, row.names = temp)
+  x <- transmute(x, pc1 = as.numeric(V1), pc2 = as.numeric(V2))
+  row.names(x) <- temp
+  x
+}
+h_tops <- top_clean(temp, plot_high)
+h_tops
+
+l_tops <- top_clean(temp, plot_low)
+l_tops
+
+#calculate median pc1 and pc2 values
+low_medians <- plot_low %>% group_by(fmt_status) %>% summarise(pc1 = median(pc1), pc2 = median(pc2))
+high_medians <- plot_high %>% group_by(fmt_status) %>% summarise(pc1 = median(pc1), pc2 = median(pc2))
+```
+
+Add dysbiosis distance to the test tibble. This calculates it once for all samples using the correct reference vectors for each cohort.
+```{r}
+# Function to calculate dysbiosis distance for each sample
+calc_dysbiosis_distance <- function(pc1, pc2, origin, endpoint) {
+  v <- c(endpoint["x"] - origin["x"], endpoint["y"] - origin["y"])
+  w <- c(pc1 - origin["x"], pc2 - origin["y"])
+  proj_scalar <- sum(v * w) / sum(v * v)
+  return(proj_scalar)
+}
+
+# Add dysbiosis distance to test tibble
+test <- fullerunWeightUniFullPcoa %>%
+  rowwise() %>%
+  mutate(
+    dysbiosis_raw = case_when(
+      target_subfragment %in% high ~ calc_dysbiosis_distance(
+        pc1, pc2,
+        origin = c(x = h_tops["PreFMT", "pc1"], y = h_tops["PreFMT", "pc2"]),
+        endpoint = c(x = h_tops["donor", "pc1"], y = h_tops["donor", "pc2"])
+      ),
+      target_subfragment %in% low ~ calc_dysbiosis_distance(
+        pc1, pc2,
+        origin = c(x = l_tops["PreFMT", "pc1"], y = l_tops["PreFMT", "pc2"]),
+        endpoint = c(x = l_tops["donor", "pc1"], y = l_tops["donor", "pc2"])
+      ),
+      TRUE ~ NA_real_
+    ),
+    dysbiosis_dist = pmax(0, pmin(1, dysbiosis_raw))
+  ) %>%
+  ungroup()
+
+# Also add cohort label for convenience
+test <- test %>%
+  mutate(cohort = case_when(
+    target_subfragment %in% high ~ "V5-V7",
+    target_subfragment %in% low ~ "V1-V4",
+    TRUE ~ NA_character_
+  ))
+
+#going to extract dysbio scores from test to attach scores to cluster data
+test %>% 
+  select(SampleID, dysbiosis_raw,dysbiosis_dist)->dysbioDist
+write_tsv(dysbioDist, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/MetaSampleDysbioDistances_083126.tsv", quote = "none")
+```

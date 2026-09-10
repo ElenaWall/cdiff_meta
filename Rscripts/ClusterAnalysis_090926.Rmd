@@ -1,0 +1,2567 @@
+---
+title: "ClusterAnalysis_062926"
+output: html_document
+date: "2026-06-29"
+---
+
+```{r, echo=FALSE}
+#cleaning
+library(broom)
+library(tidyverse)
+library(purrr)
+library(dplyr)
+
+#analysis
+library(phyloseq)
+library(qiime2R)
+library(microshades)
+library(speedyseq)
+library(cluster)
+library(NbClust)
+library(Silhouette)
+library(proxy)
+library(vegan)
+
+#plotting
+library(ggplot2)
+library(ggsignif)
+library(ggpubr)
+require(ggpubr)
+library(ggbreak)
+library(ggrepel)
+library(ggnewscale)
+library(ggh4x)
+library(ggpmisc)
+library(ggforce)
+library(ggnewscale)
+library(ggeffects)
+
+library(scales)
+library(patchwork)
+library(cowplot)
+
+#stats
+library(rstatix)
+library(lme4)
+library(performance)
+library(see)
+library(lmerTest)
+library(emmeans)
+
+#colors
+library(RColorBrewer)
+library(farver)
+library(viridis)
+
+
+library(grateful)
+
+cite_packages(output = "paragraph", out.dir = "~/Desktop/Lozupone_022425/Keith/Metaanalysis/")
+```
+```{r}
+labelVectorRedo <- setNames(c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, "unClustered"), c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "BTC"))
+
+Viridiff <- viridis(555, option = "A")
+set.seed(94)
+PrimerColors <- sprintf("%s", sample(Viridiff, 6))
+set.seed(91)
+DysbioColors <- sprintf("%s", sample(Viridiff, 12))
+DysbioColors <- setNames(DysbioColors, labelVectorRedo)
+set.seed(99)
+StudyColors <- sprintf("%s", sample(Viridiff, 14))
+set.seed(94)
+HealthColors <- sprintf("%s", sample(Viridiff, 7))
+
+show_col(DysbioColors)
+```
+
+load in Cluster Metadata
+```{r}
+myMeta <- read_tsv('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/metaMappingEW_KZHFiltered4.tsv')
+myMeta <- as_tibble(myMeta)
+colnames(myMeta)[1]<-"SampleID"
+
+fullerunWeightUniFullPcoa <- read_tsv('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/unweightedPC1234withMeta.tsv')
+
+unWeightUniPcoaRedefDysbio11 <- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/unWeighted3999DysFMTClusters_082926.tsv")
+
+# left joined myMeta to DysbioClusters to create FullFMTClusterMeta
+FullFMTClusterMeta<- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ReClusters3999Dysbio_metaAnalysis_082926.tsv")
+FullFMTClusterMeta$unNeighborClusters<- factor(
+FullFMTClusterMeta$unNeighborClusters, levels = c(labelVectorRedo))
+
+#this is just clustering meta-data
+DysbioClusters<- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/11w5DysbioClusters_082926.tsv")
+DysbioClusters$unNeighborClusters<- factor(
+DysbioClusters$unNeighborClusters, levels = c(labelVectorRedo))
+
+DysbioClusters %>% 
+  left_join(fullerunWeightUniFullPcoa)->onlyRedef11DysbioMeta
+
+# load alpha diversity metrics
+myShannon <- read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/shannon_vector.qza')$data
+myEvenness <- read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/evenness_vector.qza')$data
+myFaith <- read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/faith_pd_vector.qza')$data
+
+# turn them into tibbles and create a new column because
+# tibbles don't have rownames!
+myShannon <- as.tibble(rownames_to_column(myShannon, var = "SampleID"))
+myEvenness<-as.tibble(rownames_to_column(myEvenness, var = "SampleID"))
+myFaith %>% 
+ rename(
+   "SampleID" = V1,
+    "FaithPD" = V2 ) %>% 
+  as_tibble()->myFaith
+
+```
+
+
+1.)Phylogenetic Visualization
+```{r}
+#phyloseq drains computer, must feed trash
+qza_to_phyloseq(features ='~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/rarefied_table.qza',
+                taxonomy ='~/Desktop/Lozupone_022425/Keith/Metaanalysis/Keiths Original Files/taxonomy_silva.qza',
+                metadata = '~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ReClusters3999Dysbio_metaAnalysis_082926.tsv') -> phyloMetaSeq
+```
+```{r}
+#readRDS("~/Lozupone/Keith/Metaanalysis/Manuscript/UpdatedData082826/phyloMetaSeq_080725", refhook = NULL)
+#Use prep_mdf to agglomerate and normalize the phyloseq object, and melt to a data frame. Here we specify that NA values should be 
+#removed with the remove_na parameter, which can be adjusted according to the needs of your visualization and analysis.
+prep_mdf(phyloMetaSeq) -> MetaSeqDF
+#write_tsv(MetaSeqDF,"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/AllBiomMetaSeqDF_090326", quote = "none")
+# Create abundance dataframe & color mapping dataframe
+#Use create_color_dfs to generate a color object for the specified data. Then extract the objects used to plot. mdf represents the #object to plot; cdf represents the coloring.
+#when using code from github, the selected groups didn't exist because I Keith used a SILVA classifier
+#to check Phylums present and how many instances of those Phylums
+MetaSeqDF %>% 
+dplyr::count(Phylum)->phylumInfo
+#most common Phylums are 'Proteobacteria', 'Actinobacteria', 'Bacteroidetes', 'Firmicutes','Verrucomicrobia','Tenericutes', 'Fusobacteria', 'Lentisphaerae', 'Chloroflexi'
+MetaSeqDF %>% 
+create_color_dfs(selected_groups = c('Proteobacteria', 'Actinobacteria', 'Bacteroidetes', 'Firmicutes','Verrucomicrobia'),
+                                  cvd = TRUE) -> colorObjs_Meta_Verruc
+
+# Extract
+#dataframe of metadata attached to microshades taxonomic IDs
+mdf_Meta_Verruc <- colorObjs_Meta_Verruc$mdf
+#write.csv(mdf_Meta, "~/Lozupone/Thesis/Meta-SS/WeightClusterMeta_mfd.csv", quote =FALSE, row.names = FALSE)
+
+#dataframe of microshades taxonomic IDs attached to hexcodes
+cdf_Meta_Verruc <- colorObjs_Meta_Verruc$cdf
+#Use mdf_GP as the object to plot and use cdf_GP to assign the correct color assignments.
+
+rm(phyloMetaSeq)
+```
+
+this is taken directly from https://karstenslab.github.io/microshades/articles/remove_na_option.html
+```{r fig.height=10, fig.width=20}
+# Order the samples by Proteobacteria abundance for visual organization
+reorder_samples_by(mdf_Meta_Verruc, cdf_Meta_Verruc, 
+                      order = "Proteobacteria", 
+                      group_level = "Phylum", 
+                      subgroup_level = "Genus", 
+                      sink_abundant_groups = TRUE) -> reordered_Meta_Verruc
+
+
+# Extract dataframes of reorders
+cdf_reordered_Meta <- reordered_Meta_Verruc$cdf
+mdf_reordered_Meta <- reordered_Meta_Verruc$mdf
+
+#preFMT
+
+mdf_reordered_Meta %>%
+  subset(unNeighborClusters %in% c("1","2","3","4","5",
+                                       "6", "7", "8","9",
+                                       "10", "11","unClustered")) -> mdf_11UnNeighborClustersDysbio_Meta
+
+mdf_11UnNeighborClustersDysbio_Meta %>% 
+   pull(SimpleID, name = Sample)->labelDys
+
+```
+
+Ext Firms and Proteos Dysbio11
+```{r, fig.width= 7, fig.height= 9}
+#Here, we plot with extended Firmicutes colors in the mdf_11newClustersDysbio_Meta
+new_groups1_redoDys11 <- extend_group(mdf_11UnNeighborClustersDysbio_Meta, cdf_Meta_Verruc, "Phylum", "Genus", "Firmicutes", existing_palette = "micro_cvd_turquoise", new_palette = "micro_purple", n_add = 5)
+new_groups2_redoDys11 <- extend_group(new_groups1_redoDys11$mdf, new_groups1_redoDys11$cdf, "Phylum", "Genus", "Proteobacteria", existing_palette = "micro_cvd_green", new_palette = "micro_green", n_add = 5)
+
+Dysbio11Colors<-as.tibble(new_groups2_redoDys11$cdf)
+write_tsv(Dysbio11Colors, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/colorMatchDysbio11Neighbor_090126.tsv", quote = "none")
+
+legend_new_redoDys11 <- custom_legend(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf)
+new_legend_horiz_redoDys11 <- custom_legend(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, legend_key_size = 0.75, legend_text_size = 10, legend_orientation = "horizontal") 
+new_center_legend_horiz_redoDys11 <- plot_grid(NULL, new_legend_horiz_redoDys11, nrow=1, rel_widths=c(0.04, 0.96))
+
+plot_microshades(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf) + 
+  scale_x_discrete(labels = labelDys)+
+  scale_y_continuous(labels = scales::percent, expand = expansion(0)) +
+  theme(legend.position = "none")  +
+  theme(axis.text.x = element_text(size= 4)) +
+  facet_wrap(~unNeighborClusters, scales = "free_x", nrow = 4) +
+  theme(plot.margin = margin(1,10,10,1))+
+  theme(panel.spacing = unit(0.3, "lines")) ->diff_DysbioRe11
+
+plot_grid(diff_DysbioRe11, new_center_legend_horiz_redoDys11 , nrow=2, rel_widths = c(1,1), rel_heights = c(1,0.25)) ->DysbioRe11Diff
+DysbioRe11Diff
+
+
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "1") -> DysbioRe11Contributions1
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "2") -> DysbioRe11Contributions2
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "3") -> DysbioRe11Contributions3
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "4") -> DysbioRe11Contributions4
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "5") -> DysbioRe11Contributions5
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "6") -> DysbioRe11Contributions6
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "7") -> DysbioRe11Contributions7
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "8") -> DysbioRe11Contributions8
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "9") -> DysbioRe11Contributions9
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "10") -> DysbioRe11Contributions10
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "11") -> DysbioRe11Contributions11
+plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "unClustered") -> DysbioRe11ContributionsUnClus
+
+DysbioRe11Contributions1$box + 
+DysbioRe11Contributions2$box + 
+DysbioRe11Contributions3$box + 
+DysbioRe11Contributions4$box + 
+DysbioRe11Contributions5$box + 
+DysbioRe11Contributions6$box + 
+DysbioRe11Contributions7$box + 
+DysbioRe11Contributions8$box + 
+DysbioRe11Contributions9$box + 
+DysbioRe11Contributions10$box + 
+DysbioRe11Contributions11$box + 
+DysbioRe11ContributionsUnClus$box->conts11ReDysbio
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/TaxaBar11NeighDysbioCluster_090126.pdf", width = 15, height = 12)
+DysbioRe11Diff
+dev.off()
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Contrib11NeighDysbioCluster_090126.pdf", width = 32, height = 20)
+conts11ReDysbio
+dev.off()
+
+#dysbio 11 refined
+DysbioRe11Box1 <- as_tibble(DysbioRe11Contributions1$box$data)
+DysbioRe11Box2 <- as_tibble(DysbioRe11Contributions2$box$data)
+DysbioRe11Box3 <- as_tibble(DysbioRe11Contributions3$box$data)
+DysbioRe11Box4 <- as_tibble(DysbioRe11Contributions4$box$data)
+DysbioRe11Box5 <- as_tibble(DysbioRe11Contributions5$box$data)
+DysbioRe11Box6 <- as_tibble(DysbioRe11Contributions6$box$data)
+DysbioRe11Box7 <- as_tibble(DysbioRe11Contributions7$box$data)
+DysbioRe11Box8 <- as_tibble(DysbioRe11Contributions8$box$data)
+DysbioRe11Box9 <- as_tibble(DysbioRe11Contributions9$box$data)
+DysbioRe11Box10 <- as_tibble(DysbioRe11Contributions10$box$data)
+DysbioRe11Box11 <- as_tibble(DysbioRe11Contributions11$box$data)
+DysbioRe11BoxUnClus <- as_tibble(DysbioRe11ContributionsUnClus$box$data)
+
+
+DysbioRe11Box1 %>% 
+  full_join(DysbioRe11Box2) %>%
+  full_join(DysbioRe11Box3) %>%   
+  full_join(DysbioRe11Box4) %>% 
+  full_join(DysbioRe11Box5) %>% 
+  full_join(DysbioRe11Box6) %>% 
+  full_join(DysbioRe11Box7) %>% 
+  full_join(DysbioRe11Box8) %>% 
+  full_join(DysbioRe11Box9) %>% 
+  full_join(DysbioRe11Box10) %>% 
+  full_join(DysbioRe11Box11) %>% 
+  full_join(DysbioRe11BoxUnClus) ->DysbioRe11Box
+
+write_tsv(DysbioRe11Box, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysbioNeigh11TaxaAbund_090126.tsv",  quote = "none")
+
+rm(mdf_11UnNeighborClustersDysbio_Meta,mdf_Meta_Verruc,mdf_reordered_Meta,new_groups2_redoDys11,
+   cdf_Meta_Verruc, cdf_reordered_Meta, colorObjs_Meta_Verruc,new_center_legend_horiz_redoDys11,
+   new_center_legend_horiz_H3,new_legend_horiz_H3,new_groups1_redoH3,new_groups1_redoDys11,
+   reordered_Meta_Verruc,conts11ReDysbio,diff_DysbioRe11,
+   legend_new_H3,legend_new_redoDys11,Dysbio11Colors,
+   DysbioRe11Box1,DysbioRe11Box2,DysbioRe11Box3,DysbioRe11Box4,DysbioRe11Box5,DysbioRe11Box6,
+   DysbioRe11Box7,DysbioRe11Box8,DysbioRe11Box9,DysbioRe11Box10,DysbioRe11Box11,DysbioRe11BoxUnClus,
+  DysbioRe11Contributions1,DysbioRe11Contributions2,DysbioRe11Contributions3,DysbioRe11Contributions4,
+  DysbioRe11Contributions5,DysbioRe11Contributions6,DysbioRe11Contributions7,DysbioRe11Contributions8,
+   DysbioRe11Contributions9,DysbioRe11Contributions10,DysbioRe11Contributions11,DysbioRe11ContributionsUnClus)
+
+```
+alpha-diversity
+```{r}
+Dysbio11Colors<-read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/colorMatchDysbio11Neighbor_090126.tsv")
+
+FullFMTClusterMeta %>% 
+  left_join(myShannon) %>% 
+  left_join(myEvenness) %>% 
+  left_join(myFaith) -> myFMTClusterMetaAlphas
+
+
+# Tidying
+myFMTClusterMetaAlphas %>% 
+  select(SampleID, unNeighborClusters, SimpleID,
+         shannon_entropy, FaithPD, pielou_evenness) ->lessAlphas
+  
+lessAlphas %>% gather(-SampleID,-unNeighborClusters, -SimpleID,
+         key = 'Alpha', value = 'Value') -> tidyAlphas
+
+lessAlphas %>%
+    filter(unNeighborClusters  != 'NA' ) %>% 
+    group_by(unNeighborClusters) %>% 
+    summarise(medianFaith = median(FaithPD), meanFaith = mean(FaithPD), 
+              minFaith = min(FaithPD), maxFaith = max(FaithPD),
+              IQRFaith = IQR(FaithPD), sdFaith = sd(FaithPD),
+              medianEven = median(pielou_evenness),meanEven = mean(pielou_evenness), 
+              minEven = min(pielou_evenness), maxEven = max(pielou_evenness),
+              IQREven = IQR(pielou_evenness), sdEven = sd(pielou_evenness),
+              medianShan = median(shannon_entropy),meanShan = mean(shannon_entropy), 
+              minShan = min(shannon_entropy), maxShan = max(shannon_entropy),
+              IQRShan = IQR(shannon_entropy), sdShan = sd(shannon_entropy))-> Dys11AlphaAvgs
+
+write_tsv(Dys11AlphaAvgs, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11AlphaSumTable_090926.tsv", quote = "none")
+```
+Looking into High Cluster 11 Faith PD
+
+```{r}
+MetaSeqDF %>% 
+  filter(day_relative_to_fmt2 != "missing") %>% 
+  rename("SampleID" = Sample)-> MetaSeqDF2
+MetaSeqDF2$day_relative_to_fmt2 <- as.numeric(MetaSeqDF2$day_relative_to_fmt2)
+MetaSeqDF2 %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(SimpleID, .direction = "downup") %>% 
+   pull(SimpleID, name = study_hostID)->SimpleLabels
+
+Phyla_colors <- setNames(Dysbio11Colors$hex, Dysbio11Colors$Top_Phylum)
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Cluster11PhylaRichness2.pdf", width = 20, height = 12)
+MetaSeqDF %>%
+  filter(unNeighborClusters != "NA") %>% 
+  group_by(unNeighborClusters, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  filter(diversity > 5 ) %>% 
+  ggplot(aes(y= diversity, x= unNeighborClusters, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+      labs(y = "Distinct OTUs (Phyla contain >5)",
+       tag = "b") +
+  ggtitle("Phyla Richness (>5 distinct OTUs) in Dysbiotic Clusters") +
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_col()+
+  geom_label(aes(label =Phylum), size = 3, alpha = 0.7,  position = position_stack(vjust = 0.5))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FigS8b
+FigS8b
+
+MetaSeqDF %>%
+  filter(unNeighborClusters != "NA") %>% 
+  group_by(unNeighborClusters, Phylum, Genus, host_subject_id) %>% 
+  summarise(diversity = n_distinct(OTU)) ->HostDistinctGeneraRichness
+write_tsv(HostDistinctGeneraRichness, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/HostDistinctGeneraRichness_090926.tsv",  quote = "none")
+
+MetaSeqDF %>%
+  filter(unNeighborClusters != "NA") %>% 
+  group_by(unNeighborClusters, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  filter(diversity > 4 ) %>% 
+  ggplot(aes(y= diversity, x= unNeighborClusters, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+      labs(y = "Distinct OTUs (Phyla contain >4)",
+       tag = "b") +
+  ggtitle("Phyla Richness (>4 distinct OTUs) in Dysbiotic Clusters") +
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_col()+
+  geom_label(aes(label =Phylum), size = 3, alpha = 0.7,  position = position_stack(vjust = 0.5))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FigS8balt4
+FigS8balt4
+
+MetaSeqDF2 %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+  filter(unNeighborClusters == "11") %>% 
+  group_by(study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  filter(day_relative_to_fmt2 < 89) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+    labs(y = "Distinct OTUs",
+       tag = "c") +
+  ggtitle("Phyla Richness after FMT in Cluster 11") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID), labeller= as_labeller(SimpleLabels))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_blank(),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FigS8c
+FigS8c
+dev.off()
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Cluster11PhylaPostAlt2.pdf", width = 11, height = 8.5)
+MetaSeqDF2 %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+  filter(unNeighborClusters == "11") %>% 
+  group_by(study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  filter(day_relative_to_fmt2 < 89) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+    labs(y = "Distinct OTUs",
+       tag = "c") +
+  ggtitle("Phyla Richness after FMT in Cluster 11") +
+  geom_col()+
+    scale_x_break(c(10, 40), scales = 2.5,ticklabels=c(40,50,60,70,80))+
+    facet_grid(row = vars(study_hostID), labeller= as_labeller(SimpleLabels))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_blank(),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FigS8calt
+FigS8calt
+MetaSeqDF2 %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+  filter(unNeighborClusters == "11") %>% 
+  group_by(study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  filter(day_relative_to_fmt2 < 89) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+    labs(y = "Distinct OTUs",
+       tag = "c") +
+  ggtitle("Phyla Richness after FMT in Cluster 11") +
+  geom_col()+
+    scale_x_break(c(10, 40), scales = 2.5)+
+        scale_x_continuous(breaks=c(0,5, 10, 40,50, 60, 70))+
+    facet_grid(row = vars(study_hostID), labeller= as_labeller(SimpleLabels))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_blank(),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FigS8calt2
+FigS8calt2
+dev.off()
+```
+Want to determine relative abundances of taxa that dominate clusters
+```{r, fig.width=3.5, fig.height=11}
+DysbioRe11Box <- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysbioNeigh11TaxaAbund_090126.tsv")
+Dysbio11Colors<- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/colorMatchDysbio11Neighbor_090126.tsv")
+
+Dysbio11Colors %>% 
+  select(-Top_Phylum,-Top_Genus) %>% 
+  right_join(DysbioRe11Box, join_by(group)) %>% 
+   rename(
+   "SampleID" = Sample)->DysbioRe11Box
+
+Group_colors <- setNames(Dysbio11Colors$hex, Dysbio11Colors$group)
+
+DysbioRe11Box %>% 
+  select(SampleID,Abundance,unNeighborClusters ,group)->Re11AbundTable
+
+Re11AbundTable %>% 
+  group_by(SampleID) %>%
+  slice_max(Abundance, n = 2) %>% 
+  ungroup()->SampleDomMembers
+
+Re11AbundTable %>% 
+  group_by(unNeighborClusters,group) %>% 
+  summarise(medianAbundance = median(Abundance), 
+         meanAbundance = mean(Abundance), 
+         minimumAbundance = min(Abundance), 
+         maximumAbundance = max(Abundance),
+         IQRAbundance = IQR(Abundance), 
+         sdAbundance = sd(Abundance), 
+         nAbundance = n()) %>% 
+  ungroup()->ClusterTaxaGroupStats
+write_tsv(ClusterTaxaGroupStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11NeighborTopGroupAbund_090926.tsv", quote = "none")
+
+
+```
+
+```{r, fig.width=10, fig.height=21}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/TopTaxaByCluster_090926.pdf", width = 20, height = 12)
+ClusterTaxaGroupStats %>%
+  filter(nAbundance > 1) %>% 
+  group_by(unNeighborClusters) %>%
+  slice_max(order_by = meanAbundance, n = 3) %>% 
+  ungroup() %>% 
+  left_join(Re11AbundTable, join_by(unNeighborClusters,group)) %>% 
+  ggplot() +
+  theme_bw(base_size = 10) +
+  labs(y = "Relative Abundance",
+       tag = "b") +
+    geom_label(data = Dys11AlphaAvgs, 
+             aes(fill = meanFaith , label = round(meanFaith, digits = 3)),x=2, y = 1.15, size = 3, alpha = 0.7)+
+            scale_fill_gradient2(low = "blue",
+                            mid = "white",
+                            high = "green",
+                            midpoint = 20,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Faith PD"))+
+   new_scale_fill() +
+  geom_boxplot(aes(y= Abundance, x= group, fill = group), alpha = 0.7,)+
+  geom_point(aes( y= Abundance, x= group, fill = group), alpha = 0.5, pch = 21, size = 2.5)+
+    scale_fill_manual(values = Group_colors,
+                      guide = "none")+
+  facet_wrap(~unNeighborClusters, scales = "free_x", nrow = 4)+
+  scale_y_continuous(limits = c(0,1.15), breaks = c(0,0.2,0.4,0.6,0.8,1))+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())+
+  theme(legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->ClusterTopTaxa
+ClusterTopTaxa
+
+ClusterTaxaGroupStats %>%
+  filter(nAbundance > 1) %>% 
+  group_by(unNeighborClusters) %>%
+  slice_max(order_by = meanAbundance, n = 3) %>% 
+  ungroup() %>% 
+  left_join(Re11AbundTable, join_by(unNeighborClusters,group)) %>% 
+  ggplot() +
+  theme_bw(base_size = 10) +
+  labs(y = "Relative Abundance",
+       tag = "b") +
+    geom_label(data = Dys11AlphaAvgs, 
+             aes(fill = meanFaith , label = round(meanFaith, digits = 3)),x=2, y = 1.15, size = 3, alpha = 0.7)+
+            scale_fill_gradient2(low = "blue",
+                            mid = "white",
+                            high = "green",
+                            midpoint = 20,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Faith PD"))+
+   new_scale_fill() +
+  geom_boxplot(aes(y= Abundance, x= group, fill = group), alpha = 0.7,)+
+  geom_point(aes( y= Abundance, x= group, fill = group), alpha = 0.5, pch = 21, size = 2.5)+
+    scale_fill_manual(values = Group_colors,
+                      guide = "none")+
+  facet_wrap(~unNeighborClusters, scales = "free_x", nrow = 4)+
+  scale_y_continuous(limits = c(0,1.15), breaks = c(0,0.2,0.4,0.6,0.8,1))+
+  theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_blank())+
+  theme(legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->ClusterTopTaxaNames
+ClusterTopTaxaNames
+dev.off()  
+
+SampleDomMembers %>% 
+  ggplot(aes(y= Abundance, x= group,fill = group)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Top Phyla in Dysbiotic Clusters") +
+  geom_boxplot()+
+  geom_point( pch = 21, size = 2.5)+
+  scale_fill_manual(values = Group_colors)+
+  facet_grid(row = vars(unNeighborClusters), scales = "free_x")+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0))+
+    theme(legend.position="none")
+
+Re11AbundTable %>% 
+  group_by(unNeighborClusters) %>%
+  top_n(10, Abundance) %>%
+  group_by(SampleID) %>% 
+  filter(n() == 1) %>% 
+  ungroup()->TopAbunRe11
+```
+
+
+Going back to using metadata categories for enterotyping, so will need to use the subsetted core-diversity metrics from the 
+```{r}
+##
+## Unweighted All
+myUnweightUniFullPcoa <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/unweighted_unifrac_pcoa_results.qza')$data
+#get axis info
+unweightUniFullProp <- myUnweightUniFullPcoa$ProportionExplained[1:4]
+
+#unweighted full prepare axis labels 
+unweighted1_xaxis = paste0('PC1 (', round(unweightUniFullProp[1], 3) * 100, '%)')
+unweighted2_yaxis = paste0('PC2 (', round(unweightUniFullProp[2], 3) * 100, '%)')
+unweighted3_yaxis = paste0('PC3 (', round(unweightUniFullProp[3], 3) * 100, '%)')
+unweighted4_yaxis = paste0('PC4 (', round(unweightUniFullProp[4], 3) * 100, '%)')
+
+#turn them into tibbles and stuff
+myUnweightUniFullPcoa <- as_tibble(myUnweightUniFullPcoa$Vectors)
+
+colnames(myUnweightUniFullPcoa)[1] <- 'SampleID'
+
+# reducing data if needed
+myUnweightUniFullPcoa %>% 
+  select(SampleID,PC1, PC2,PC3, PC4) ->lessUnweightedPCoA
+
+rm(myUnweightUniFullPcoa, unweightUniFullProp)
+
+myMeta %>% 
+  left_join(lessUnweightedPCoA) %>% 
+  left_join(myShannon) %>% 
+  left_join(myFaith) %>% 
+  left_join(myEvenness)->fullerunWeightUniFullPcoa
+#write_tsv(fullerunWeightUniFullPcoa, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/unweightedPC123withMeta.tsv", quote = "none")
+```
+
+```{r}
+#going to add Weighted PCoA data to each subset
+myWeightUniPcoaDysbio <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics_MetaAnalysis_preFMT-1004/weighted_unifrac_pcoa_results.qza')$data
+#get axis info
+WeightUniFullProp <- myWeightUniPcoaDysbio$ProportionExplained[1:3]
+
+#unweighted full prepare axis labels 
+WeightDys1_xaxis = paste0('PC1 (', round(WeightUniFullProp [1], 3) * 100, '%)')
+WeightDys2_yaxis = paste0('PC2 (', round(WeightUniFullProp [2], 3) * 100, '%)')
+WeightDys3_xaxis = paste0('PC2 (', round(WeightUniFullProp [3], 3) * 100, '%)')
+
+#turn them into tibbles and stuff
+myWeightUniPcoaDysbio <- as_tibble(myWeightUniPcoaDysbio$Vectors)
+
+colnames(myWeightUniPcoaDysbio)[1] <- 'SampleID'
+colnames(myWeightUniPcoaDysbio)[2] <- 'PC1Dys_Wt'
+colnames(myWeightUniPcoaDysbio)[3] <- 'PC2Dys_Wt'
+colnames(myWeightUniPcoaDysbio)[4] <- 'PC3Dys_Wt'
+
+# reducing data if needed
+myWeightUniPcoaDysbio %>% 
+  select(SampleID,PC1Dys_Wt, PC2Dys_Wt, PC3Dys_Wt) ->lessWeighted123PCoADys
+
+rm(myWeightUniPcoaDysbio, WeightUniFullProp)
+
+fullerunWeightUniFullPcoa %>% 
+   left_join(lessWeighted123PCoADys) %>% 
+  left_join(DysbioClusters, join_by(SampleID)) ->metaUnWtUniFullSubWtPcoa
+
+```
+want to map clustering info onto PCoA
+
+```{r}
+#Dysbio Weight
+metaUnWtUniFullSubWtPcoa %>% 
+   ggplot(aes(PC1Dys_Wt,PC2Dys_Wt)) +
+    theme_bw(base_size = 18) +
+    xlab(WeightDys1_xaxis) +
+    ylab(WeightDys2_yaxis) +
+  ggtitle("Weighted Meta-analysis with 11 Dysbio Neighbor Refined Enterotypes") +
+    geom_point(data = metaUnWtUniFullSubWtPcoa %>% 
+               filter(unNeighborClusters != "NA"),
+               aes(fill = unNeighborClusters), pch = 21, size = 3, color = 'black') +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
+          theme(legend.position="bottom") ->DysbioWt11
+
+print(DysbioWt11)
+
+```
+Unweighted plots
+```{r}
+##Dysbio
+
+#11 redo
+metaUnWtUniFullSubWtPcoa%>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(unweighted1_xaxis) +
+    ylab(unweighted2_yaxis) +
+  ggtitle("Unweighted Meta-analysis with 11 reClustered + Neighbors Dysbiotic Enterotypes") +
+    geom_point(data = metaUnWtUniFullSubWtPcoa, fill = "grey", alpha = 0.1, pch = 21, size = 3, color = 'black') +
+  geom_point(data = metaUnWtUniFullSubWtPcoa%>% 
+               filter(unNeighborClusters != "NA"),
+               aes(fill = unNeighborClusters), pch = 21, size = 3, color = 'black') +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = c("1","2","3","4","5","6","7","8","9","10","11","BTC"))+
+  theme(legend.position="bottom") -> dysbioRedo11
+
+print(dysbioRedo11)
+```
+
+```{r}
+#Goals: Connect Dysbiosis Distance to Clusters and possible do boxplot with stats
+#Post DysbioDist~ Distinct Dysbio Cluster
+#Post DysbioDist~ Gradient Proteobacteria Rel. Abundance
+#change in DysbioDist based on Dysbio Cluster
+#DysbioDist ~ preCluster + donorCluster + (preClust*donorClust)
+dysbioDist <- read_tsv('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/MetaSampleDysbioDistances_083126.tsv')
+
+#Attaching dysbio distances onto lotsa meta data
+metaUnWtUniFullSubWtPcoa%>% 
+  left_join(dysbioDist)->metaUnWtUniFullSubWtPcoaDD
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysDistExtremesPcoa_090926.pdf", width = 8, height = 5)
+metaUnWtUniFullSubWtPcoaDD%>% 
+  ggplot(aes(PC1,PC2)) +
+    theme_bw(base_size = 18) +
+    xlab(unweighted1_xaxis) +
+    ylab(unweighted2_yaxis) +
+  ggtitle("Unweighted Meta-analysis Extreme Dysbiosis Distances") +
+    geom_point(data = metaUnWtUniFullSubWtPcoaDD, fill = "grey", alpha = 0.1, pch = 21, size = 3, color = 'black') +
+  geom_point(data = metaUnWtUniFullSubWtPcoaDD%>% 
+               filter(dysbiosis_dist == 0),
+               fill= "#fcfdbf",pch = 21, size = 3, color = 'black') +
+  geom_point(data = metaUnWtUniFullSubWtPcoaDD%>% 
+               filter(dysbiosis_dist == 1),
+               fill= "#51127c",pch = 21, size = 3, color = 'black') +
+            theme(legend.position = "bottom",
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_text(size = 10),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+dev.off()
+
+metaUnWtUniFullSubWtPcoaDD %>% 
+  filter(unNeighborClusters != 'NA') %>% 
+    group_by(unNeighborClusters) %>% 
+    summarise(medianDysDist = median(dysbiosis_dist), mean = mean(dysbiosis_dist), 
+              minimum = min(dysbiosis_dist), maximum = max(dysbiosis_dist),
+              IQR = IQR(dysbiosis_dist), sd = sd(dysbiosis_dist), n = n())-> Dys11DstanceAvgs
+
+write_tsv(Dys11DstanceAvgs, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11DistanceSumTab_090926.tsv", quote = "none")
+
+
+#dysbio 11 redo
+centersUnWt<- aggregate(cbind(PC1, PC2) ~ unNeighborClusters, data=metaUnWtUniFullSubWtPcoaDD, FUN=mean)
+centersWt <- aggregate(cbind(PC2Dys_Wt,PC1Dys_Wt) ~ unNeighborClusters, data=metaUnWtUniFullSubWtPcoaDD, FUN=mean)
+centersWt %>% 
+  left_join(centersUnWt) %>% 
+  left_join(Dys11DstanceAvgs)->CentersAvgTabel
+write_tsv(CentersAvgTabel, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/11DDSumStatsTable_090926.tsv", quote = "none")
+
+
+colnames(CentersAvgTabel)[2] <- 'PC2Dys_WtAv'
+colnames(CentersAvgTabel)[3] <- 'PC1Dys_WtAv'
+colnames(CentersAvgTabel)[4] <- 'PC1Dys_UnWtAv'
+colnames(CentersAvgTabel)[5] <- 'PC2Dys_UnWtAv'
+
+metaUnWtUniFullSubWtPcoaDD  %>% 
+  filter(unNeighborClusters != 'NA') %>% 
+  group_by(unNeighborClusters) %>%
+  get_summary_stats(dysbiosis_dist, type = "median_iqr") %>% 
+  ungroup()-> DeltaStats
+write_tsv(DeltaStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDeltaStats_090926.tsv", quote ="none")
+```
+stats/plots for pre filtering Clustered preFMT samples
+```{r, fig.width=18, fig.height=12}
+metaUnWtUniFullSubWtPcoaDD  %>% 
+  filter(unNeighborClusters != 'NA') %>% 
+  kruskal.test(data = ., dysbiosis_dist~unNeighborClusters)->myDDClusterKruskal
+# data:  dysbiosis_dist  unNeighborClusters
+# Kruskal-Wallis chi-squared = 143.19, df = 11, p-value < 2.2e-16
+metaUnWtUniFullSubWtPcoaDD  %>% 
+  filter(unNeighborClusters != 'NA') %>% 
+  kruskal_effsize(data = ., dysbiosis_dist~unNeighborClusters)->DDClusterEffect
+#Large effect size when looking at full 305 eta2[H] = 0.4511488
+metaUnWtUniFullSubWtPcoaDD  %>% 
+  filter(unNeighborClusters != 'NA') %>% 
+  rstatix::dunn_test(data = ., dysbiosis_dist~unNeighborClusters, p.adjust.method = "BH",
+                     effect.size = TRUE)->myDDDunn
+
+myDDDunn %>% 
+    filter(p.adj.signif != 'ns') %>% 
+  select(group1,group2,p.adj.signif) %>% 
+  mutate(p.adj = p.adj.signif) %>% 
+  mutate(y.position = c(seq(0.9, 2.35, length.out = 29)))->SignifDDCluster
+
+#delta distance before filtering for pre/post matched FMT patients
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDysDistBoxplots_090926.pdf", width = 13, height = 11)
+metaUnWtUniFullSubWtPcoaDD  %>% 
+  filter(unNeighborClusters != 'NA') %>% #304 obs
+  ggplot(aes(y= dysbiosis_dist, x= unNeighborClusters)) +
+  labs(title = "Dysbiosis Distances of 11 Clusters",
+       subtitle = "Full Pre-FMT Set",
+       x = "Cluster",
+       y = "Dysbiosis Distance",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size = 2.5)+
+  geom_label(data = CentersAvgTabel, 
+             aes(x = unNeighborClusters, 
+                 label = round(medianDysDist, digits = 3)), y = 2.45, size = 4)+
+    stat_compare_means(method = "kruskal.test",label.y = 2, size = 6, aes(label = paste0("Kruskal p = ", after_stat(p.format)))) + 
+  stat_pvalue_manual(SignifDDCluster,tip.length = 0.01)+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = labelVectorRedo)+
+  scale_y_continuous(limits = c(0,2.45))+
+  scale_x_discrete(limits= labelVectorRedo)+
+    theme(legend.position="none")->DysDistAllBox
+DysDistAllBox
+
+metaUnWtUniFullSubWtPcoaDD  %>% 
+  filter(unNeighborClusters != 'NA') %>% #304 obs
+  ggplot(aes(y= dysbiosis_dist, x= unNeighborClusters)) +
+  labs(title = "Dysbiosis Distances of 11 Clusters",
+       subtitle = "Full Pre-FMT Set",
+       x = "Cluster",
+       y = "Dysbiosis Distance",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size = 2.5)+
+  geom_label(data = CentersAvgTabel, 
+             aes(x = unNeighborClusters, 
+                 label = round(medianDysDist, digits = 3)), y = 2.45, size = 4)+
+    stat_compare_means(method = "kruskal.test",label.y = 2, size = 6, aes(label = paste0("Kruskal p = ", after_stat(p.format)))) + 
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = labelVectorRedo)+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_discrete(limits= labelVectorRedo)+
+    theme(legend.position="none")->DysDistBaseNoBar
+DysDistBaseNoBar
+
+myDDDunn %>% 
+ggplot(aes(x = group1, y = group2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = r), alpha = 1)+
+  geom_tile(data = . %>%
+              filter(p.adj.signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = p.adj.signif), size = 6)+
+            scale_fill_gradientn(colors = c("blue", "white", "green"),
+                            values = rescale(c(-1,0,1)),
+                            breaks = c(-1,-0.3, 0, 0.3, 10),
+                            limits = c(-1, 1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(7, "cm"),
+                                                    title = "Z-score"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->BaseDDSignifPlot
+BaseDDSignifPlot
+
+((DysDistBaseNoBar) | BaseDDSignifPlot)+
+  plot_layout(ncol = 2, widths = c(2.5, 1.5))->BaseDDBox
+BaseDDBox
+dev.off()
+```
+plot dysbio scores of clusters on pcoas
+```{r, fig.width=8, fig.height=5}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDysDistNeighborPCoAs_090926.pdf", width = 11, height = 8.5)
+#Dysbio Weight
+metaUnWtUniFullSubWtPcoaDD %>% 
+   ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(WeightDys1_xaxis) +
+    ylab(WeightDys2_yaxis) +
+      labs(tag = "c") +
+       geom_point(data = CentersAvgTabel %>%
+                group_by(unNeighborClusters), 
+                aes(y= PC2Dys_WtAv, x= PC1Dys_WtAv, fill=unNeighborClusters),
+                    pch = 21, size = 15, alpha = 0.5)+
+    geom_point(data = metaUnWtUniFullSubWtPcoaDD %>% 
+               filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt,fill = unNeighborClusters), pch = 21, size = 1.75, color = 'black') +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+                  guides(fill = "none")+ 
+              new_scale_fill() +
+              geom_label_repel(data = CentersAvgTabel, 
+                                 aes(fill = medianDysDist , x = PC1Dys_WtAv, y = PC2Dys_WtAv, label = round(medianDysDist, digits = 3)),size = 3)+
+        scale_fill_gradient2(low = "blue",
+                            mid = "white",
+                            high = "green",
+                            midpoint = 0.1,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Dysbiosis Distance"))+
+          theme(legend.position = "bottom",
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_text(size = 10),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Fig1WtUni
+Fig1WtUni
+
+#Dysbio UnWeight
+metaUnWtUniFullSubWtPcoaDD %>% 
+   ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(unweighted1_xaxis) +
+    ylab(unweighted2_yaxis) +
+  labs(title = "Unweighted UniFrac PCoA with 11 Pre-FMT Clusters",
+       subtitle = "Centers and Dysbiosis Scores",
+       tag = "c") +
+    geom_point(data = metaUnWtUniFullSubWtPcoa, aes(y= PC2, x= PC1), fill = "grey", alpha = 0.1, pch = 21, size = 3, color = 'black') +
+       geom_point(data = CentersAvgTabel,
+                aes(y= PC2Dys_UnWtAv, x= PC1Dys_UnWtAv, fill = unNeighborClusters),
+                    pch = 21, size = 15, alpha = 0.5)+
+    geom_point(data = metaUnWtUniFullSubWtPcoaDD %>% 
+               filter(unNeighborClusters != "NA"),
+               aes(y= PC2, x= PC1,fill = unNeighborClusters ), pch = 21, size = 3, color = 'black') +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+                guides(fill = "none")+ 
+              new_scale_fill() +
+             geom_label_repel(data = CentersAvgTabel, 
+                                 aes(fill = medianDysDist , x = PC1Dys_UnWtAv, y = PC2Dys_UnWtAv, label = round(medianDysDist, digits = 3)),size = 3)+
+        scale_fill_gradient2(low = "blue",
+                            mid = "white",
+                            high = "green",
+                            midpoint = 0.1,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "D.D"))+
+          theme(legend.position = "bottom",
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_text(size = 10),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                plot.title = element_text( size = 18),
+                plot.subtitle = element_text( size = 16),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->SuppUnWtUni
+SuppUnWtUni
+dev.off()
+
+```
+
+```{r, fig.width=9, fig.height=11}
+(free(DysbioRe11Diff) / Fig1WtUni)+
+  plot_layout(nrow = 2, heights = c(1.5, 0.75))->Fig1L
+
+(Fig1L | ClusterTopTaxa )+
+  plot_layout(ncol = 2, widths = c(3,1))->Fig1
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Fig5_090926.pdf", width = 8.5, height = 11)
+Fig1
+dev.off()
+```
+
+connect pre-postFMT. This looks at time course
+```{r}
+#One PreFMT closest to FMT and Full PostFMT samples
+#filter out FMT junk and changing host_subject_id to Study host Id so that we dont group subjects that are called the same thing but are from different studies
+metaUnWtUniFullSubWtPcoaDD %>% 
+  filter(exp_type == 'FMT') %>% 
+  filter(experiment_title != 'Flannigan_FMT') %>% #doesn't have a preFMT
+  filter(fmt_status != 'vanco') %>% 
+  filter(fmt_status != 'donor') %>%
+  filter(fmt_status != 'PostFMT-sham')%>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  filter(all(c("PreFMT", "PostFMT") %in% fmt_status)) ->allPrePostFMT #patientID has both preFMT and postFMT
+
+allPrePostFMT$day_relative_to_fmt2<-as.numeric(allPrePostFMT$day_relative_to_fmt2)
+
+#1150 objs, some of the subject IDs have multiple values from same day. We really only want one value from preFMT. following will grab day closest to FMT 
+allPrePostFMT %>%
+  group_by(study_hostID, fmt_status) %>% 
+  filter(n() > 1)%>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ungroup()-> TwoManyPre #subjects have multiple preFMT samples
+#44 have multiple pre
+TwoManyPre %>%
+  group_by(study_hostID) %>% 
+  filter(day_relative_to_fmt2 != max(day_relative_to_fmt2)) %>% 
+  ungroup()->EarlyExtra 
+#20 early selected
+#KEEP everything EXCEPT EarlyExtras
+allPrePostFMT %>% 
+  anti_join(EarlyExtra)->PrePostAfterFMT
+#still have 2 pre samples from same patient and day
+PrePostAfterFMT %>%
+  group_by(study_hostID, fmt_status) %>% 
+  filter(n() > 1)%>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ungroup()-> TwoManyPre2 
+set.seed(23)
+TwoManyPre2  %>%
+  group_by(study_hostID) %>% 
+  slice_sample(n = 1) %>% 
+  ungroup()->doubleSample 
+PrePostAfterFMT %>%
+  anti_join(doubleSample)->PrePostAfterFMT
+#1128 remaining, but some have -1 in post
+PrePostAfterFMT %>%
+  filter(fmt_status == 'PostFMT') %>% 
+  filter(day_relative_to_fmt2 == -1)-> StrangePost
+PrePostAfterFMT %>% 
+  anti_join(StrangePost)->PrePostAfterFMT
+#1126 remaining, but some have NA for day relative to fmt
+PrePostAfterFMT %>% 
+  filter(day_relative_to_fmt2 != "NA")->PrePostAfterFMT 
+#1115 remaining
+#the sham FMT has to go
+PrePostAfterFMT  %>% 
+  filter(study_hostID != 'Staley RI FMT trial_RSUB15')->PrePostAfterFMT
+#1113 remaining
+PrePostAfterFMT %>% 
+    group_by(study_hostID) %>% 
+  filter(!all(c("PreFMT", "PostFMT") %in% fmt_status)) %>% 
+  ungroup()-> Unmatched 
+PrePostAfterFMT %>% 
+  anti_join(Unmatched)->PrePostAfterFMT
+#1111 remaining
+#this groups the post samples into bins, kinda like keiths
+PrePostAfterFMT %>% 
+    ungroup() %>% 
+    mutate(postDRFBin = case_when(fmt_status == "PostFMT" & between(day_relative_to_fmt2, 0,1) ~ "0-1",
+                              between(day_relative_to_fmt2, 2,3) ~ "2-3",
+                              between(day_relative_to_fmt2, 4,7) ~ "4-7",
+                              between(day_relative_to_fmt2, 8,14) ~ "8-14",
+                              between(day_relative_to_fmt2, 15,30) ~ "15-30",
+                              between(day_relative_to_fmt2, 30,100) ~ "30-100",
+                              day_relative_to_fmt2 >= 100 ~ "late",
+                              fmt_status == "PreFMT" ~ "preFMT"))->PrePostAfterFMT
+
+
+PrePostAfterFMT$day_relative_to_fmt2 <-as.numeric(PrePostAfterFMT$day_relative_to_fmt2)
+
+#confirm there is always a pre, for each post
+PrePostAfterFMT %>% 
+  group_by(study_hostID) %>%
+  summarise(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  ungroup()->PreAddsUp
+#241 TRUE, 0 FALSE
+
+#count pre/post timepoints
+PrePostAfterFMT  %>%
+  group_by(fmt_status) %>% 
+  dplyr::count(fmt_status) %>% 
+  ungroup()->PrePostPatientNumber
+#241 pre, 870 post
+
+rm(TwoManyPre,EarlyExtra,TwoManyPre2,doubleSample, StrangePost,PreAddsUp)
+```
+Assuming very late days of sampling (drf 300-700) aren't going to tell us as much about FMT response. 
+```{r}
+#going to maintain the last one up to 90 days. Start by taking samples up to drf 90
+PrePostAfterFMT %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) ->  EarlyPrePostAfterFMT
+#986 samples before 90 days post/pre
+EarlyPrePostAfterFMT %>% 
+  group_by(study_hostID, fmt_status) %>% 
+  filter(fmt_status == 'PostFMT') %>% 
+  filter(n() > 1) %>% 
+  ungroup()-> TwoManyEarlyPost
+#699 multiple post samples
+#save postFMT highest day rel. fmt
+TwoManyEarlyPost %>% 
+  group_by(study_hostID) %>% 
+  filter(day_relative_to_fmt2 != max(day_relative_to_fmt2)) %>% 
+  ungroup()->earlyAfterPost
+#506 earlier postFMT timepoints
+EarlyPrePostAfterFMT %>% 
+  anti_join(earlyAfterPost)->EarlyLastPostFMT
+#480 objs, some of the subject IDs have multiple values from same day 
+EarlyLastPostFMT  %>% 
+  group_by(study_hostID, fmt_status) %>% 
+  filter(n() > 1) %>% 
+  ungroup()->TwoManySamples
+#4 have more than one of each
+#Randomly choose ONE from that subset
+set.seed(23)
+TwoManySamples %>%
+  group_by(study_hostID) %>% 
+  slice_sample(n = 1) %>% 
+  ungroup()->randomExtraEarly 
+#2 randomly selected
+#KEEP everything EXCEPT randomExtras
+EarlyLastPostFMT %>% 
+  anti_join(randomExtraEarly)->EarlyLastPostFMT
+#478...check that they are all matched
+EarlyLastPostFMT   %>% 
+  group_by(study_hostID) %>%
+  mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == FALSE) ->checkEarlyLastPost
+#These four patients only have really late postFMT: Staley combo_CS,Staley combo_KK,Staley combo_MR1,fricke_P1
+EarlyLastPostFMT   %>% 
+  group_by(study_hostID) %>%
+  mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  ungroup()->PreEarlyPostMatchedFMT
+#474 remaining
+PreEarlyPostMatchedFMT %>%
+      mutate(RangePostBin = case_when(fmt_status == "PostFMT" & between(day_relative_to_fmt2, 0,14) ~ "halfMonth",
+                                                between(day_relative_to_fmt2, 14,30) ~ "1Month",
+                                               between(day_relative_to_fmt2, 30,60) ~ "2Month",
+                                               day_relative_to_fmt2 > 60 ~ "3Month",
+                                              TRUE ~ "NA")) %>% 
+                                              select(-has_both)->PrePostMatchedFMT 
+
+PrePostMatchedFMT  %>% 
+  mutate(preDRFBin = case_when(between(day_relative_to_fmt2, -10,-5) ~ "midCond",
+                              day_relative_to_fmt2 < -10 ~ "preCond",
+                              between(day_relative_to_fmt2, -5,0) ~ "lateCond",
+                              fmt_status == "PostFMT" ~ "PostFMT")) -> PrePostMatchedFMT
+
+#confirm there is always one pre and post
+PrePostMatchedFMT  %>% 
+  group_by(study_hostID) %>%
+  summarise(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == FALSE) %>% 
+  ungroup()->matching
+
+#count post timepoints for each study_hostID
+PrePostMatchedFMT %>% 
+  dplyr::count(study_hostID)->numberPatientPost
+#237 patients
+PrePostMatchedFMT %>% 
+  group_by(fmt_status) %>%
+  dplyr::count(preDRFBin)->CountsPreBin
+
+rm(TwoManyEarlyPost,earlyAfterPost,EarlyLastPostFMT,TwoManySamples,randomExtraEarly ,checkEarlyLastPost,matching)
+```
+
+```{r}
+#calculate delta dysbio distance, There will be a distinct delta for each post
+PrePostAfterFMT %>% 
+  group_by(study_hostID) %>% 
+  mutate(deltaDistance = dysbiosis_dist - dysbiosis_dist[fmt_status == 'PreFMT']) %>% 
+  ungroup()->DistDiffAfterPrePostFMT
+  
+DistDiffAfterPrePostFMT$deltaDistance <-as.numeric(DistDiffAfterPrePostFMT$deltaDistance)
+
+#Dysbiosis score has a hard ceiling of 1, and we see that those who start out closer to 1 have less steep slopes obviously, want to normalize this to see make responder v non responder groups more real. Called Percent of Possible Gain
+DistDiffAfterPrePostFMT  %>% 
+  group_by(study_hostID) %>% 
+  mutate(noZeroDysDist= dysbiosis_dist + 0.001) %>% 
+  mutate(NonZeroChange = (noZeroDysDist - noZeroDysDist[fmt_status == 'PreFMT'])) %>% 
+  mutate(NormedDelta = NonZeroChange/(1 - noZeroDysDist[fmt_status == 'PreFMT'])) %>% 
+  ungroup()->normDistDiffAfterPrePostFMT
+write_tsv(normDistDiffAfterPrePostFMT, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/afterPrePostFMTDysDistDelta_090926.tsv", quote = "none")
+
+
+
+#calculate delta dysbio distance for the pre-FMT and last day up to 90 pairs, every patient pair should have the same delta difference.
+PrePostMatchedFMT  %>% 
+  group_by(study_hostID) %>% 
+  mutate(deltaDistance = dysbiosis_dist[match('PostFMT', fmt_status)] - dysbiosis_dist[match('PreFMT', fmt_status)]) %>%   
+  ungroup()->DistDiffPrePostMatchFMT
+
+write_tsv(DistDiffPrePostMatchFMT, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/matchedPrePostFMTDysDistDelta_090926.tsv", quote = "none")
+
+#Dysbiosis score has a hard ceiling of 1, and we see that those who start out closer to 1 have less steep slopes obviously, want to normalize this to see make responder v non responder groups more real. Called Percent of Possible Gain
+DistDiffPrePostMatchFMT  %>% 
+  group_by(study_hostID) %>% 
+  mutate(noZeroDysDist= dysbiosis_dist + 0.001) %>% 
+  mutate(NonZeroChange = (noZeroDysDist[match('PostFMT', fmt_status)] - noZeroDysDist[match('PreFMT', fmt_status)])) %>% 
+  mutate(NormedDelta = NonZeroChange/(1 - noZeroDysDist[match('PreFMT', fmt_status)])) %>% 
+  ungroup()->normDistDiffPrePostMatchFMT
+
+write_tsv(normDistDiffPrePostMatchFMT, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/matchedPrePostFMTDysNormedDistDelta_090926.tsv", quote = "none")
+```
+
+
+```{r}
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  group_by(unNeighborClusters) %>%
+  get_summary_stats(deltaDistance, type = "median_iqr") %>% 
+  ungroup()-> DeltaStats
+write_tsv(DeltaStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDeltaStats_090926.tsv", quote ="none")
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  group_by(unNeighborClusters) %>%
+  get_summary_stats(NormedDelta, type = "median_iqr") %>% 
+  ungroup()-> NormDDStats
+write_tsv(NormDDStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterNormDDStats_090926.tsv", quote ="none")
+
+```
+boxplots
+```{r}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDysDistResponsePlots_090926.pdf", width = 11, height = 8.5)
+#boxplot of matched pre to post DysBio Dist
+PrePostMatchedFMT  %>% 
+  ggplot(aes(y= dysbiosis_dist, x= fmt_status)) +
+  theme_bw(base_size = 18) +
+    labs(title = "Matched Pre-Post FMT D.D.",
+       subtitle = "237 Patients",
+       x = "FMT Status",
+       y = "Dysbiosis Distance",
+       tag = NULL) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size = 3.5)+
+  geom_path(aes(group = study_hostID), alpha = 0.2)+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+               labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
+                 scale_x_discrete(limits=c("PreFMT","PostFMT"))
+
+#dys dist for matched patients FMT plots/stats
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  kruskal.test(data = ., dysbiosis_dist ~ unNeighborClusters)->my237DysDistClusterKruskal
+
+# data:  dysbiosis_dist by unNeighborClusters
+# Kruskal-Wallis chi-squared = 108.1, df = 11, p-value < 2.2e-16
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  kruskal_effsize(data = ., dysbiosis_dist ~ unNeighborClusters)->my237DysDistEffect
+#0.4315352
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  dunn_test(data = ., dysbiosis_dist ~ unNeighborClusters, p.adjust.method = "BH",
+            effect.size = TRUE)->my237DysDistClusterDunn
+write_tsv(my237DysDistClusterDunn, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/my237DysDistClusterDunn_090926.tsv", quote = "none")
+
+my237DysDistClusterDunn %>% 
+    filter(p.adj.signif != 'ns') %>% 
+  select(group1,group2,p.adj.signif) %>% 
+  mutate(p.adj = p.adj.signif) %>% 
+  mutate(y.position = c(seq(0.9, 2.35, length.out = 26)))->Signif237DysDistDunn
+
+#boxplot of dysbio clusters and their starting dysbio distances for just matched patients
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  ggplot(aes(y= dysbiosis_dist, x= unNeighborClusters)) +
+  ggtitle("") +
+    labs(title = "Matched FMT Baseline Dysbiosis Distances of 11 Clusters",
+       subtitle = "237 Patients",
+       x = "Cluster",
+       y = "Dysbiosis Distance",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+    geom_label(data = . %>% 
+                 group_by(unNeighborClusters) %>% 
+    summarise(medianDysDist = median(dysbiosis_dist)),
+             aes(x = unNeighborClusters, 
+                 label = round(medianDysDist, digits = 3)), y = 2.55, size = 4)+
+  stat_compare_means(method = "kruskal.test",label.y = 2.3, aes(label = paste0("p = ", after_stat(p.format)))) + 
+  stat_pvalue_manual(Signif237DysDistDunn,tip.length = 0.01)+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+      scale_x_discrete(limits=labelVectorRedo)+
+  scale_y_continuous(limits=c(0,2.5))+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->matchedDysDistBox
+matchedDysDistBox
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  ggplot(aes(y= dysbiosis_dist, x= unNeighborClusters)) +
+  ggtitle("") +
+    labs(title = "Matched FMT Baseline Dysbiosis Distances of 11 Clusters",
+       subtitle = "237 Patients",
+       x = "Cluster",
+       y = "Dysbiosis Distance",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+    geom_label(data = . %>% 
+                 group_by(unNeighborClusters) %>% 
+    summarise(medianDysDist = median(dysbiosis_dist)),
+             aes(x = unNeighborClusters, 
+                 label = round(medianDysDist, digits = 3)), y = 1.1, size = 4)+
+  stat_compare_means(method = "kruskal.test",label.y = 0.75, aes(label = paste0("p = ", after_stat(p.format)))) + 
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+      scale_x_discrete(limits=labelVectorRedo)+
+  scale_y_continuous(limits=c(0,1.1),
+                     breaks = c(0,0.2, 0.4, 0.6, 0.8,1))+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->matchedDysDistNoBar
+matchedDysDistNoBar
+
+my237DysDistClusterDunn %>% 
+ggplot(aes(x = group1, y = group2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = r), alpha = 1)+
+  geom_tile(data = . %>%
+              filter(p.adj.signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = p.adj.signif), size = 6)+
+            scale_fill_gradientn(colors = c("blue", "white", "green"),
+                            values = rescale(c(-1,0,1)),
+                            breaks = c(-1,-0.3, 0, 0.3, 1),
+                            limits = c(-1, 1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(7, "cm"),
+                                                    title = "Z-Value"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->BaseDDSig237Plot
+BaseDDSig237Plot
+
+#delta distance stats/plots
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  kruskal.test(data = ., deltaDistance~unNeighborClusters)->mydeltaClusterKruskal
+# data:  deltaDistance by unNeighborClusters
+# Kruskal-Wallis chi-squared = 69.998, df = 11, p-value = 1.223e-10
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  kruskal_effsize(data = ., deltaDistance~unNeighborClusters)->my237DeltaDistEffect
+#0.2622119
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  dunn_test(data = ., deltaDistance ~ unNeighborClusters, p.adjust.method = "BH",
+            effect.size = TRUE)->myClusterDeltaDunn
+write_tsv(myClusterDeltaDunn, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDeltaDunn_090926.tsv", quote ="none")
+myClusterDeltaDunn %>% 
+    filter(p.adj.signif != 'ns') %>% 
+  select(group1,group2,p.adj.signif) %>% 
+  mutate(p.adj = p.adj.signif) %>% 
+  mutate(y.position = c(seq(1.1, 2.2, length.out = 16)))->SignifDeltaDunn
+
+
+#boxplot of dysbio clusters and their delta distances  
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= deltaDistance, x= unNeighborClusters)) +
+    labs(title = "Change in Dysbiosis Distances of 11 Clusters",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "Cluster",
+       y = "Change in Dysbiosis Distance (Pre to Post)",
+       tag = "b") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+       stat_compare_means(method = "kruskal.test",label.y = 2, aes(label = paste0("p = ", after_stat(p.format)))) + 
+  stat_pvalue_manual(SignifDeltaDunn,tip.length = 0.01)+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+      scale_x_discrete(limits=labelVectorRedo)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->matchedDeltaBox
+matchedDeltaBox
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= deltaDistance, x= unNeighborClusters)) +
+    labs(title = "Change in Dysbiosis Distances of 11 Clusters",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "Cluster",
+       y = "Change in Dysbiosis Distance (Pre to Post)",
+       tag = "b") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+       stat_compare_means(method = "kruskal.test",label.y = -0.7, aes(label = paste0("p = ", after_stat(p.format)))) + 
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+      scale_x_discrete(limits=labelVectorRedo)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->DeltaBoxNoBar
+DeltaBoxNoBar
+
+myClusterDeltaDunn %>% 
+ggplot(aes(x = group1, y = group2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = r), alpha = 1)+
+  geom_tile(data = . %>%
+              filter(p.adj.signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = p.adj.signif), size = 6)+
+            scale_fill_gradientn(colors = c("blue", "white", "green"),
+                            values = rescale(c(-1,0,1)),
+                            breaks = c(-1,-0.3, 0, 0.3, 1),
+                            limits = c(-1, 1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(7, "cm"),
+                                                    title = "Z-score"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->DeltaSig237Plot
+DeltaSig237Plot
+
+#scatterplot of deltadistance by baseline
+normDistDiffPrePostMatchFMT %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= deltaDistance, x= dysbiosis_dist, color = unNeighborClusters)) +
+    labs(title = "Change in Dysbiosis Distance ~ Baseline D.D",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "Baseline Dysbiosis Distance",
+       y = "Change in Dysbiosis Distance (Pre to Post)",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+  geom_smooth(method = "lm", se = FALSE, alpha = 0.3) +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+          discrete_scale(aesthetics = "color",
+               palette = function(x) c(DysbioColors))+
+  theme(legend.position="right",
+        legend.title = element_blank(),
+        plot.title = element_text( size = 14),
+        plot.subtitle = element_text( size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->deltaScatter
+deltaScatter
+
+#normed delta plots/stats
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>%#237 obs
+  kruskal.test(data = ., NormedDelta~unNeighborClusters)->myNormDDClusterKruskal
+# data:  NormedDelta by unNeighborClusters
+# Kruskal-Wallis chi-squared = 50.558, df = 11, p-value = 4.968e-07
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>%#237 obs
+  kruskal_effsize(data = ., NormedDelta~unNeighborClusters)->my237NormDDEffect
+#0.1758116
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  dunn_test(data = ., NormedDelta ~ unNeighborClusters, p.adjust.method = "BH",
+            effect.size = TRUE)->myClusterNormDDDunn
+write_tsv(myClusterNormDDDunn, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/myClusterNormDDDunn_090926.tsv", quote ="none")
+
+myClusterNormDDDunn %>% 
+    filter(p.adj.signif != 'ns') %>% 
+  select(group1,group2,p.adj.signif) %>% 
+  mutate(p.adj = p.adj.signif) %>% 
+  mutate(y.position = c(seq(1.5, 3.9, length.out = 11)))->SignifNormDDDunn
+
+#boxplot of dysbio clusters and their delta distances but normalized by baseline
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= NormedDelta, x= unNeighborClusters)) +
+    labs(title = "Normalized Delta Dysbiosis Scores of 11 Clusters",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "Cluster",
+       y = "Normalized Change from Baseline (log10 scale)",
+       tag = "d") +  
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+  stat_compare_means(method = "kruskal.test",label.y = 3, aes(label = paste0("p = ", after_stat(p.format)))) + 
+  stat_pvalue_manual(SignifNormDDDunn,tip.length = 0.001)+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+    coord_trans(y = "pseudo_log", ylim = c(-60,4))+
+  scale_y_continuous(breaks = c(-50, -25,-10,-5,-2.5,-1,0,1,2,3,4))+
+      scale_x_discrete(limits= labelVectorRedo)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->normDDBox
+normDDBox
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= NormedDelta, x= unNeighborClusters)) +
+    labs(title = "Normalized Delta Dysbiosis Scores of 11 Clusters",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "Cluster",
+       y = "Normalized Change from Baseline (log10 scale)",
+       tag = "d") +  
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+  stat_compare_means(method = "kruskal.test",label.y = -30, aes(label = paste0("p = ", after_stat(p.format)))) + 
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+    coord_trans(y = "pseudo_log", ylim = c(-60,1.15))+
+  scale_y_continuous(breaks = c(-50, -25,-10,-5,-2.5,-1,0,1))+
+      scale_x_discrete(limits= labelVectorRedo)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->normDeltaBoxNoBar
+normDeltaBoxNoBar
+
+myClusterNormDDDunn %>% 
+ggplot(aes(x = group1, y = group2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = statistic), alpha = 1)+
+  geom_tile(data = . %>%
+              filter(p.adj.signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = p.adj.signif), size = 6)+
+            scale_fill_gradientn(colors = c("blue", "white", "green"),
+                            values = rescale(c(-1,0,1)),
+                            breaks = c(-1,-0.3, 0, 0.3, 1),
+                            limits = c(-1, 1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(7, "cm"),
+                                                    title = "Z-Value"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->normDeltaSig237Plot
+normDeltaSig237Plot
+
+#scatterplot of NormedDelta by baseline
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= NormedDelta, x= dysbiosis_dist, color = unNeighborClusters)) +
+      labs(title = "Normalized Delta Dysbiosis Scores ~ Baseline Dybiosis Distance",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "Baseline Dysbiosis Distance",
+       y = "Normalized Change from Baseline(log10 scale)",
+       tag = "b") +
+  theme_bw(base_size = 18) +
+    scale_y_log10(labels = label_number())+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+  geom_smooth(method = "lm", se = FALSE, alpha = 0.3) +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+          discrete_scale(aesthetics = "color",
+               palette = function(x) c(DysbioColors))+
+    theme(legend.position="right",
+        legend.title = element_blank(),
+        plot.title = element_text( size = 14),
+        plot.subtitle = element_text( size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->NormDDScatter
+NormDDScatter
+dev.off()
+```
+```{r, fig.width=25, fig.height=18}
+((matchedDysDistNoBar) | BaseDDSig237Plot)+
+  plot_layout(ncol = 2, widths = c(2.5, 1))->s7a
+
+((DeltaBoxNoBar) | DeltaSig237Plot)+
+  plot_layout(ncol = 2, widths = c(2.5, 1))->s7b
+
+((normDeltaBoxNoBar) | normDeltaSig237Plot)+
+  plot_layout(ncol = 2, widths = c(2.5, 1))->s7d
+
+
+wrap_plots(s7a,s7b, SuppUnWtUni, s7d)->altSuppFig7
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig7_090926.pdf", width = 15, height = 12)
+altSuppFig7
+dev.off()
+```
+```{r, fig.width=15, fig.height=12}
+(matchedDysDistBox | matchedDeltaBox) / (SuppUnWtUni | normDDBox)->Fig7
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig72_090926.pdf", width = 15, height = 12)
+Fig7
+dev.off()
+```
+
+```{r}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterFaithBoxPlot_090926.pdf", width = 11, height = 8.5)
+#Faith for matched patients FMT plots/stats
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  kruskal.test(data = ., FaithPD ~ unNeighborClusters)->my237DysFaithKruskal
+# data:  FaithPD by unNeighborClusters
+# Kruskal-Wallis chi-squared = 118.45, df = 11, p-value < 2.2e-16
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  kruskal_effsize(data = ., FaithPD ~ unNeighborClusters)->my237DysFaithEffect
+#0.4775443
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  dunn_test(data = ., FaithPD ~ unNeighborClusters, p.adjust.method = "BH", 
+            effect.size = TRUE)->my237FaithClusterDunn
+write_tsv(my237FaithClusterDunn, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/my237FaithClusterDunn_090926.tsv", quote = "none")
+
+my237FaithClusterDunn %>% 
+    filter(p.adj.signif != 'ns') %>% 
+  select(group1,group2,p.adj.signif) %>% 
+  mutate(p.adj = p.adj.signif) %>% 
+  mutate(y.position = c(seq(80, 500, length.out = 32)))->Signif237FaithDunn
+
+#boxplot of dysbio clusters and their starting faith PD for just matched patients
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  ggplot(aes(y= FaithPD, x= unNeighborClusters)) +
+  ggtitle("") +
+    labs(title = "Matched FMT FaithPD Scores of 11 Clusters",
+       subtitle = "237 Patients",
+       x = "Cluster",
+       y = "Faith PD",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+    stat_compare_means(method = "kruskal.test",label.y = 50, aes(label = paste0("p = ", after_stat(p.format)))) + 
+  stat_pvalue_manual(Signif237FaithDunn,tip.length = 0.001)+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+    coord_trans(y = "pseudo_log", ylim = c(0,500))+
+  scale_y_continuous(breaks = c(0,5,10,25,50,100,150,250,500))+
+      scale_x_discrete(limits= labelVectorRedo)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->matchedFaithBox
+matchedFaithBox
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% #237 obs
+  ggplot(aes(y= FaithPD, x= unNeighborClusters)) +
+  ggtitle("") +
+    labs(title = "Matched FMT FaithPD Scores of 11 Clusters",
+       subtitle = "237 Patients",
+       x = "Cluster",
+       y = "Faith PD",
+       tag = "a") +
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+    stat_compare_means(method = "kruskal.test",label.y = 50, aes(label = paste0("p = ", after_stat(p.format)))) + 
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+    coord_trans(y = "pseudo_log", ylim = c(0,150))+
+  scale_y_continuous(breaks = c(0,5,10,25,50,100,150))+
+      scale_x_discrete(limits= labelVectorRedo)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->matchedFaithBoxNoBar
+matchedFaithBoxNoBar
+
+my237FaithClusterDunn %>% 
+ggplot(aes(x = group1, y = group2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = r ), alpha = 1)+
+  geom_tile(data = . %>%
+              filter(p.adj.signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = p.adj.signif))+
+            scale_fill_gradientn(colors = c("blue", "white", "green"),
+                            values = rescale(c(-1,0,1)),
+                            breaks = c(-1,-0.3, 0, 0.3, 1),
+                            limits = c(-1, 1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(7, "cm"),
+                                                    title = "Estimate"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FaithBoxSigPlot
+FaithBoxSigPlot
+dev.off()
+```
+
+```{r}
+((matchedFaithBoxNoBar) | FaithBoxSigPlot)+
+  plot_layout(ncol = 2, widths = c(1.75, 0.75))->S8a
+
+
+(FigS8balt4 | FigS8calt)+
+  plot_layout(ncol = 2, widths = c(1.5, 1.5))->S8bc
+```
+
+```{r, fig.width=15, fig.height=18}
+(S8a / S8bc)+
+  plot_layout(nrow = 2, heights = c(0.75, 1))->SuppFig8
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig8_090926.pdf", width = 15, height = 12)
+SuppFig8
+dev.off()
+```
+
+
+```{r}
+PrePostMatchedFMT %>% 
+filter(unNeighborClusters != "NA") %>% 
+  group_by(target_subfragment) %>%
+dplyr::count(unNeighborClusters) ->infoPreSubFrag
+
+PrePostMatchedFMT %>% 
+filter(unNeighborClusters != "NA") ->PreMatchedData
+  
+SubfragDataPre<- table(PreMatchedData$unNeighborClusters, PreMatchedData$target_subfragment)
+resultSubPre <- chisq.test(SubfragDataPre)
+print(resultSubPre)
+#significant relationship (X-squared = 203.91, df = 55, p-value < 2.2e-16)              
+resultSubPre$expected
+cramResultSubPre<-cramer_v(SubfragDataPre)
+print(cramResultSubPre)
+#moderate effect size (0.4148)
+
+PrePostMatchedFMT %>% 
+filter(unNeighborClusters != "NA") %>% 
+  group_by(experiment_title) %>%
+dplyr::count(unNeighborClusters) ->infoPreStudy
+
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/MatchedFMTClusterDistributionPlots_090926.pdf", width = 11, height = 8.5)
+infoPreSubFrag  %>%   
+  ggplot(aes(fill=target_subfragment, y= n, x= unNeighborClusters)) +
+      ggtitle("Distribution of Subfragment for 11 Neighbor redo Dysbio clusters in PreFMT with matched Post") +
+  geom_bar(position="stack", stat="identity")+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(PrimerColors))+
+    scale_x_discrete(limits=labelVectorRedo)+
+    theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+
+infoPreStudy  %>%   
+  ggplot(aes(fill=experiment_title, y= n, x= unNeighborClusters)) +
+      ggtitle("Distribution of Studies for 11 redo Dysbio clusters in PreFMT with matched Post") +
+    geom_bar(position="stack", stat="identity")+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(StudyColors))+
+    scale_x_discrete(limits=labelVectorRedo)+
+    theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+dev.off()
+
+
+StudyDataPre<- table(PreMatchedData$unNeighborClusters, PreMatchedData$experiment_title)
+resultStudyPre <- chisq.test(StudyDataPre)
+print(resultStudyPre)
+#significant relationship (307.11, df = 132, p-value = 5.47e-16)              
+resultStudyPre$expected
+cramResultStudyPre<-cramer_v(StudyDataPre)
+print(cramResultStudyPre)
+#moderate effect size (0.3432 )
+
+```
+
+LMEMs
+```{r}
+#this model will look at dysbiosis distance as the outcome variable and it will do so using patient as the random intercept, the null model will account for DRF. In one model we will include cluster, and in another we will add the interaction of cluster with DRF.
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(dysbiosis_dist~ day_relative_to_fmt2 + (1|study_hostID),REML=FALSE, data = .)-> LongMENull_model
+summary(LongMENull_model)
+# Linear mixed model fit by maximum likelihood . t-tests use Satterthwaite's method ['lmerModLmerTest']
+# Formula: dysbiosis_dist ~ day_relative_to_fmt2 + (1 | study_hostID)
+#    Data: .
+# 
+#       AIC       BIC    logLik -2*log(L)  df.resid 
+#     203.8     220.4     -97.9     195.8       468 
+# 
+# Scaled residuals: 
+#     Min      1Q  Median      3Q     Max 
+# -2.5183 -0.9222 -0.1844  0.8239  2.2913 
+# 
+# Random effects:
+#  Groups       Name        Variance Std.Dev.
+#  study_hostID (Intercept) 0.00000  0.0000  
+#  Residual                 0.08865  0.2977  
+# Number of obs: 472, groups:  study_hostID, 236
+# 
+# Fixed effects:
+#                       Estimate Std. Error        df t value Pr(>|t|)    
+# (Intercept)          3.057e-01  1.660e-02 4.720e+02   18.42   <2e-16 ***
+# day_relative_to_fmt2 7.930e-03  5.351e-04 4.720e+02   14.82   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Correlation of Fixed Effects:
+#             (Intr)
+# dy_rltv_t_2 -0.564
+# optimizer (nloptwrap) convergence code: 0 (OK)
+# boundary (singular) fit: see help('isSingular')
+
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(dysbiosis_dist~ day_relative_to_fmt2 + unNeighborClusters + (1|study_hostID), data = .)-> LongMENoIntX_model
+summary(LongMENoIntX_model)
+# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
+# Formula: dysbiosis_dist ~ day_relative_to_fmt2 + unNeighborClusters +      (1 | study_hostID)
+#    Data: .
+# 
+# REML criterion at convergence: 220.5
+# 
+# Scaled residuals: 
+#     Min      1Q  Median      3Q     Max 
+# -2.6574 -0.7931 -0.1715  0.8161  2.3489 
+# 
+# Random effects:
+#  Groups       Name        Variance Std.Dev.
+#  study_hostID (Intercept) 0.00000  0.00    
+#  Residual                 0.08411  0.29    
+# Number of obs: 472, groups:  study_hostID, 236
+# 
+# Fixed effects:
+#                                 Estimate Std. Error         df t value Pr(>|t|)    
+# (Intercept)                    2.381e-01  3.371e-02  4.590e+02   7.063 6.09e-12 ***
+# day_relative_to_fmt2           8.068e-03  5.234e-04  4.590e+02  15.416  < 2e-16 ***
+# unNeighborClusters2            2.912e-02  4.784e-02  4.590e+02   0.609 0.542990    
+# unNeighborClusters3            1.243e-02  5.004e-02  4.590e+02   0.248 0.803913    
+# unNeighborClusters4           -4.459e-02  7.566e-02  4.590e+02  -0.589 0.555942    
+# unNeighborClusters5            2.376e-01  6.549e-02  4.590e+02   3.628 0.000318 ***
+# unNeighborClusters6            1.155e-01  8.983e-02  4.590e+02   1.286 0.199241    
+# unNeighborClusters7            1.595e-02  6.547e-02  4.590e+02   0.244 0.807652    
+# unNeighborClusters8            1.128e-01  5.718e-02  4.590e+02   1.972 0.049215 *  
+# unNeighborClusters9            4.958e-02  6.982e-02  4.590e+02   0.710 0.477983    
+# unNeighborClusters10           2.583e-01  5.715e-02  4.590e+02   4.520 7.89e-06 ***
+# unNeighborClusters11           1.386e-01  9.731e-02  4.590e+02   1.424 0.155021    
+# unNeighborClustersunClustered  5.686e-02  4.646e-02  4.590e+02   1.224 0.221642    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(dysbiosis_dist~ day_relative_to_fmt2 * unNeighborClusters + (1|study_hostID),data = .)-> LongMENeighbor_model
+summary(LongMENeighbor_model)
+as.data.frame(summary(LongMENeighbor_model)$coefficients) %>% 
+  rownames_to_column("terms")->DRFXClusterRTb
+
+ write_tsv(DRFXClusterRTb, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFXCluster_090926.tsv", quote = "none")
+
+
+# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
+# Formula: dysbiosis_dist ~ day_relative_to_fmt2 * unNeighborClusters +      (1 | study_hostID)
+#    Data: .
+# REML criterion at convergence: 301.6
+# Scaled residuals: 
+#     Min      1Q  Median      3Q     Max 
+# -2.6560 -0.7383 -0.1967  0.8062  2.4685 
+# 
+# Random effects:
+#  Groups       Name        Variance Std.Dev.
+#  study_hostID (Intercept) 0.00000  0.0000  
+#  Residual                 0.08032  0.2834  
+# Number of obs: 470, groups:  study_hostID, 235
+# 
+# Fixed effects:
+#                                                      Estimate Std. Error         df t value Pr(>|t|)    
+# (Intercept)                                         2.092e-01  3.842e-02  4.460e+02   5.446 8.51e-08 ***
+# day_relative_to_fmt2                                9.705e-03  1.234e-03  4.460e+02   7.868 2.75e-14 ***
+# unNeighborClusters2                                 1.826e-02  5.627e-02  4.460e+02   0.324 0.745723    
+# unNeighborClusters3                                 3.632e-02  6.028e-02  4.460e+02   0.603 0.547090    
+# unNeighborClusters4                                -1.288e-02  8.955e-02  4.460e+02  -0.144 0.885678    
+# unNeighborClusters5                                 2.855e-01  7.656e-02  4.460e+02   3.729 0.000217 ***
+# unNeighborClusters6                                 1.381e-01  1.076e-01  4.460e+02   1.284 0.199746    
+# unNeighborClusters7                                 7.316e-02  7.637e-02  4.460e+02   0.958 0.338647    
+# unNeighborClusters8                                 1.292e-01  6.740e-02  4.460e+02   1.917 0.055825 .  
+# unNeighborClusters9                                 7.788e-02  8.292e-02  4.460e+02   0.939 0.348089    
+# unNeighborClusters10                                4.663e-01  6.891e-02  4.460e+02   6.767 4.15e-11 ***
+# unNeighborClusters11                                1.931e-01  1.210e-01  4.460e+02   1.596 0.111141    
+# unNeighborClustersunClustered                       7.433e-02  5.531e-02  4.460e+02   1.344 0.179693    
+# day_relative_to_fmt2:unNeighborClusters2            7.082e-04  1.816e-03  4.460e+02   0.390 0.696686    
+# day_relative_to_fmt2:unNeighborClusters3           -1.395e-03  1.836e-03  4.460e+02  -0.760 0.447800    
+# day_relative_to_fmt2:unNeighborClusters4           -1.787e-03  2.674e-03  4.460e+02  -0.668 0.504417    
+# day_relative_to_fmt2:unNeighborClusters5           -2.110e-03  2.991e-03  4.460e+02  -0.706 0.480851    
+# day_relative_to_fmt2:unNeighborClusters6           -1.373e-03  2.779e-03  4.460e+02  -0.494 0.621572    
+# day_relative_to_fmt2:unNeighborClusters7           -3.361e-03  2.490e-03  4.460e+02  -1.350 0.177781    
+# day_relative_to_fmt2:unNeighborClusters8           -7.061e-04  2.629e-03  4.460e+02  -0.269 0.788431    
+# day_relative_to_fmt2:unNeighborClusters9           -1.609e-03  2.509e-03  4.460e+02  -0.641 0.521636    
+# day_relative_to_fmt2:unNeighborClusters10          -1.348e-02  2.565e-03  4.460e+02  -5.253 2.32e-07 ***
+# day_relative_to_fmt2:unNeighborClusters11          -2.775e-03  3.402e-03  4.460e+02  -0.816 0.415145    
+# day_relative_to_fmt2:unNeighborClustersunClustered -1.002e-03  1.780e-03  4.460e+02  -0.563 0.573835    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+ normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(dysbiosis_dist~ day_relative_to_fmt2 + unNeighborClusters + (1|study_hostID), REML=FALSE, data = .)-> LongMENoIntX_model2
+ 
+anova(LongMENull_model,LongMENoIntX_model2)->aovCluster
+ write_tsv(aovCluster %>% 
+              rownames_to_column("Model"),"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFandClusterAOV_090926.tsv", quote = "none")
+
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(dysbiosis_dist~ day_relative_to_fmt2 * unNeighborClusters + (1|study_hostID),REML=FALSE,data = .)-> LongMENeighbor_model2
+
+anova(LongMENoIntX_model2, LongMENeighbor_model2)->aovDRFxCluster
+write_tsv(aovDRFxCluster %>% 
+             rownames_to_column("Model"), "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFXClusterAOV_090126.tsv", quote = "none")
+
+TrendsDDIntX <- emtrends(LongMENeighbor_model, "unNeighborClusters", var = "day_relative_to_fmt2")
+pairs(TrendsDDIntX,adjust = "BH") %>% 
+        # summary()->DDTrendsCorrectedPairComps
+as.data.frame() %>% 
+  separate_wider_delim(., cols = contrast, delim = "-", names = c("Comp1","Comp2")) %>% 
+  mutate(Comp1 = str_replace_all(Comp1, " ", "")) %>% 
+  mutate(Comp2 = str_replace_all(Comp2, " ", "")) ->DDSlopeTable
+
+DDSlopeTable %>% 
+  mutate(signif = symnum(DDSlopeTable$p.value,
+                                   cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1),
+                                   symbols = c("****", "***", "**", "*", "ns"),
+                                   abbr.colnames = FALSE,
+                                   na = ""))->DDSlopeTableSig
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DDSlopePairwisePlot_090926.pdf", width = 11, height = 8.5)
+DDSlopeTableSig %>% 
+ggplot(aes(x = Comp1, y = Comp2), alpha = 0.3) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = estimate))+
+  geom_tile(data = . %>%
+              filter(signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = signif))+
+            scale_fill_gradientn(colors = c("blue", "white","green"),
+                            values = rescale(c(0.1, 0.05,0.001)),
+                            breaks = c(0.1,0.05, 0),
+                            trans = "pseudo_log",
+                            limits = c(0, 0.1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Significance"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->DDSignifPlot
+DDSignifPlot
+
+DDSlopeTableSig %>% 
+ggplot(aes(x = Comp1, y = Comp2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = estimate), alpha = 0.8)+
+  geom_tile(data = . %>%
+              filter(signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = signif))+
+            scale_fill_gradientn(colors = c("blue", "green"),
+                            values = rescale(c(-2,0,.5)),
+                            breaks = c(-2,-1.5,-1, -0.5, 0, 0.5),
+                            limits = c(-2, 0.5),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Estimate"))+
+  theme(legend.position="none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->DDSigEstPlot
+DDSigEstPlot
+dev.off()
+
+
+emtrends(LongMENeighbor_model, pairwise ~ unNeighborClusters, 
+         var = "day_relative_to_fmt2",adjust = "BH")->eSlopeClustDD
+eSlopeClustDD$emtrends %>% 
+  summary()->slopeClustEmTrends
+eSlopeClustDD$contrasts %>% 
+  summary()->slopeClustContrasts
+
+```
+Faith as outcome
+```{r}
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(FaithPD~ day_relative_to_fmt2 + (1|study_hostID), REML=FALSE, data = .)-> FaithNull_model
+summary(FaithNull_model)
+
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(FaithPD~ day_relative_to_fmt2 + unNeighborClusters + (1|study_hostID), data = .)-> LongMEFaithNoIntX_model
+summary(LongMEFaithNoIntX_model)
+
+normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(FaithPD~ day_relative_to_fmt2 * unNeighborClusters + (1|study_hostID),data = .)-> LongMEFaithIntX_model
+summary(LongMEFaithIntX_model)
+
+as.data.frame(summary(LongMEFaithIntX_model)$coefficients) %>% 
+  rownames_to_column("terms")->DRFXClusterFaithTb
+
+ write_tsv(DRFXClusterFaithTb, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFXClusterFaith_090926.tsv", quote = "none")
+#REML FALSE for stats
+ normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(FaithPD~ day_relative_to_fmt2 + unNeighborClusters + (1|study_hostID), REML=FALSE, data = .)->LongMEFaithNoIntX_model2
+ 
+  normDistDiffPrePostMatchFMT %>%
+  group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+    lmer(FaithPD~ day_relative_to_fmt2 * unNeighborClusters + (1|study_hostID), REML=FALSE, data = .)->LongMEFaithIntX_model2
+
+anova(FaithNull_model,LongMEFaithNoIntX_model2)->aovFaithCluster
+
+# Data: .
+# Models:
+# FaithNull_model: FaithPD ~ day_relative_to_fmt2 + (1 | study_hostID)
+# LongMEFaithNoIntX_model2: FaithPD ~ day_relative_to_fmt2 + unNeighborClusters + (1 | study_hostID)
+#                          npar    AIC  BIC  logLik -2*log(L)  Chisq Df Pr(>Chisq)    
+# FaithNull_model             4 3736.3 3753 -1864.2    3728.3                         
+# LongMEFaithNoIntX_model2   15 3560.7 3623 -1765.3    3530.7 197.66 11  < 2.2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+ write_tsv(aovFaithCluster %>% 
+              rownames_to_column("Model"),"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/FaithDRFandClusterAOV_090926.tsv", quote = "none")
+anova(LongMEFaithNoIntX_model2, LongMEFaithIntX_model2)->aovDRFxClusterFaith
+  write_tsv(aovDRFxClusterFaith %>% 
+               rownames_to_column("Model"), "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/FaithDRFXClusterAOV_090926.tsv", quote = "none")
+
+# Data: .
+# Models:
+# LongMEFaithNoIntX_model2: FaithPD ~ day_relative_to_fmt2 + unNeighborClusters + (1 | study_hostID)
+# LongMEFaithIntX_model2: FaithPD ~ day_relative_to_fmt2 * unNeighborClusters + (1 | study_hostID)
+#                          npar    AIC  BIC  logLik -2*log(L)  Chisq Df Pr(>Chisq)    
+# LongMEFaithNoIntX_model2   15 3560.7 3623 -1765.3    3530.7                         
+# LongMEFaithIntX_model2     26 3388.9 3497 -1668.5    3336.9 193.76 11  < 2.2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+
+# Multiple Test Correction with least square means in mixed models
+TrendsFaithIntX <- emtrends(LongMEFaithIntX_model, "unNeighborClusters", var = "day_relative_to_fmt2")
+pairs(TrendsFaithIntX,adjust = "BH") %>% 
+        # summary()->DDTrendsCorrectedPairComps
+as.data.frame() %>% 
+  separate_wider_delim(., cols = contrast, delim = "-", names = c("Comp1","Comp2")) %>% 
+  mutate(Comp1 = str_replace_all(Comp1, " ", "")) %>% 
+  mutate(Comp2 = str_replace_all(Comp2, " ", "")) ->FaithSlopeTable
+
+FaithSlopeTable %>% 
+  mutate(signif = symnum(FaithSlopeTable$p.value,
+                                   cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1),
+                                   symbols = c("****", "***", "**", "*", "ns"),
+                                   abbr.colnames = FALSE,
+                                   na = ""))->FaithSlopeTableSig
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/FaithSlopePairwisePlot_090926.pdf", width = 11, height = 8.5)
+FaithSlopeTableSig %>% 
+ggplot(aes(x = Comp1, y = Comp2), alpha = 0.3) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = p.value))+
+#  geom_tile(data = . %>%
+              #filter(signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = signif))+
+            scale_fill_gradientn(colors = c("grey", "white","green"),
+                            values = rescale(c(0.1, 0.05,0.001)),
+                            breaks = c(0.1,0.05, 0),
+                            trans = "pseudo_log",
+                            limits = c(0, 0.1),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Significance"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FaithSignifPlot
+FaithSignifPlot
+
+FaithSlopeTableSig %>% 
+ggplot(aes(x = Comp1, y = Comp2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = estimate), alpha = 0.8)+
+  geom_tile(data = . %>%
+              filter(signif == "ns"), fill = "grey")+
+  scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"),position = "top")+
+    scale_y_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  geom_text(aes(label = signif))+
+            scale_fill_gradientn(colors = c("blue", "green"),
+                            values = rescale(c(-2,0,.5)),
+                            breaks = c(-2,-1.5,-1, -0.5, 0, 0.5),
+                            limits = c(-2, 0.5),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Estimate"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FaithSigEstPlot
+FaithSigEstPlot
+dev.off()
+```
+
+```{r}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/AltFacetLongitudinalClusterModel_090926.pdf", width = 11, height = 8.5)
+normDistDiffPrePostMatchFMT %>%
+    group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+  ggplot(aes(x=day_relative_to_fmt2,y=dysbiosis_dist, fill = unNeighborClusters))+
+    theme_bw(base_size = 18) +
+      labs(
+       x = NULL,
+       y = "Dysbiosis Distance",
+       tag = "a") +
+    geom_path(data = . %>%
+              filter(NormedDelta < 0),
+              aes(group = study_hostID), color = "grey", alpha = 0.75)+
+    geom_path(data = . %>% 
+                    filter(NormedDelta >= 0),
+              aes(group = study_hostID, color = NormedDelta), alpha = 0.25)+
+    geom_point(pch = 21, size = 3, color = 'black') +
+  geom_smooth(method = "lm",se = FALSE, color = 'black', size = 1)+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors), guide =  "none")+
+  stat_regline_equation(label.x = 0.1, label.y = 1.1, size =4)+
+          scale_color_gradient2(low = "blue",
+                            mid = "yellow",
+                            high = "red",
+                            midpoint = 0.2,
+                            trans = "pseudo_log",
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Normalized Delta DD"))+
+  facet_wrap(~unNeighborClusters, nrow = 2)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12,angle = 300, hjust = 0),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->DDFacetModel
+DDFacetModel
+
+normDistDiffPrePostMatchFMT %>%
+    group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+  ggplot(aes(x=day_relative_to_fmt2,y=FaithPD, fill = unNeighborClusters))+
+    theme_bw(base_size = 18) +
+      labs(
+       x = "Day Relative FMT",
+       y = "Faith PD",
+       tag = "b") +
+  geom_path(data = . %>%
+              filter(NormedDelta < 0),
+              aes(group = study_hostID), color = "grey", alpha = 0.75)+
+    geom_path(data = . %>% 
+                    filter(NormedDelta >= 0),
+              aes(group = study_hostID, color = NormedDelta), alpha = 0.25)+
+    geom_point(pch = 21, size = 3, color = 'black') +
+  geom_smooth( method = "lm",se = FALSE, color = 'black', size = 1)+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors), guide =  "none")+
+  stat_regline_equation(label.x = 0.1, label.y = 1.1, size = 4)+
+  facet_wrap(~unNeighborClusters, , scales = "free_y",nrow = 2)+
+          scale_color_gradient2(low = "blue",
+                            mid = "yellow",
+                            high = "red",
+                            midpoint = 0.2,
+                            trans = "pseudo_log",
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Normalized Delta DD"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12,angle = 300, hjust = 0),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FaithFacetModel
+FaithFacetModel
+dev.off()
+```
+
+```{r, fig.width=20, fig.height=8}
+((DDFacetModel) | DDSignifPlot)+
+  plot_layout(nrow = 1, widths = c(1.75, 0.75))->S9Up
+((FaithFacetModel) | FaithSignifPlot)+
+  plot_layout(nrow = 1, widths = c(1.75, 0.75))->S9Down
+```
+
+```{r, fig.width=20, fig.height=16}
+(S9Up / S9Down )->FiS9
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig9_090926.pdf", width = 15, height = 12)
+FiS9
+dev.off()
+```
+
+```{r, fig.width=15, fig.height=12}
+DDFacetModel / FaithFacetModel->AltFig6
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/AltFig6_090926.pdf", width = 15, height = 12)
+AltFig6
+dev.off()
+```
+
+
+```{r}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterOtherPlots_090926.pdf", width = 11, height = 8.5)
+normDistDiffPrePostMatchFMT %>% 
+  filter(fmt_status == "PreFMT") %>% 
+   ggplot(aes(x= PC4, y = NormedDelta)) +
+        labs(title = "Change in Dysbiosis Distance ~ Unweighted PC4",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "PC4 Coordinate",
+       y = "Change in Dysbiosis Distance (Pre to Post)",
+       tag = "b") +
+    theme_bw(base_size = 18) +
+  scale_y_log10(labels = label_number())+
+    geom_point(aes(fill = unNeighborClusters), pch = 21, size = 3, color = 'black') +
+    geom_smooth(aes(color = unNeighborClusters),method = "lm", se = FALSE, alpha = 0.3) +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
+            discrete_scale(aesthetics = "color",
+               palette = function(x) c(DysbioColors))+
+                guides(color = "none")+
+          theme(legend.position="right",
+        legend.title = element_blank(),
+        plot.title = element_text( size = 14),
+        plot.subtitle = element_text( size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0)) ->DeltaPC4Scatter
+DeltaPC4Scatter
+
+normDistDiffPrePostMatchFMT %>% 
+  filter(fmt_status == "PreFMT") %>% 
+   ggplot(aes(x= PC2Dys_Wt, y = deltaDistance)) +
+        labs(title = "Change in Dysbiosis Distance ~ Weighted PC2",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "PC2 Coordinate",
+       y = "Change in Dysbiosis Distance (Pre to Post)",
+       tag = "b") +
+    theme_bw(base_size = 18) +
+    geom_point(aes(fill = unNeighborClusters), pch = 21, size = 3, color = 'black') +
+    geom_smooth(aes(color = unNeighborClusters),method = "lm", se = FALSE, alpha = 0.3) +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
+            discrete_scale(aesthetics = "color",
+               palette = function(x) c(DysbioColors))+
+          guides(color = "none")+
+          theme(legend.position="right",
+        legend.title = element_blank(),
+        plot.title = element_text( size = 14),
+        plot.subtitle = element_text( size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->DeltaPC2Scatter
+DeltaPC2Scatter
+
+normDistDiffPrePostMatchFMT %>% 
+  filter(fmt_status == "PreFMT") %>% 
+   ggplot(aes(x= FaithPD, y = deltaDistance)) +
+        labs(title = "Change in Dysbiosis Distance ~ Faith PD",
+       subtitle = "Matched Pre- & Post-FMT",
+       x = "FaithPD",
+       y = "Change in Dysbiosis Distance (Pre to Post)",
+       tag = "b") +
+    theme_bw(base_size = 18) +
+    geom_point(aes(fill = unNeighborClusters), pch = 21, size = 3, color = 'black') +
+    geom_smooth(aes(color = unNeighborClusters),method = "lm", se = FALSE, alpha = 0.3) +
+  scale_x_log10(labels = label_number())+
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
+            discrete_scale(aesthetics = "color",
+               palette = function(x) c(DysbioColors))+
+          guides(color = "none")+
+          theme(legend.position="right",
+        legend.title = element_blank(),
+        plot.title = element_text( size = 14),
+        plot.subtitle = element_text( size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0)) ->DeltaFaithScatter
+DeltaFaithScatter
+dev.off()
+```
+
+Keith wants to know if rCDI varies from initial CDI in response
+```{r}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/CamachoClusterModels.pdf", width = 11, height = 8.5)
+normDistDiffPrePostMatchFMT %>%
+  filter(experiment_title == "Initial FMT") %>% 
+    group_by(study_hostID) %>%
+    filter(day_relative_to_fmt2 > -89) %>% 
+    mutate(has_both = n_distinct(fmt_status) == 2) %>%
+  filter(has_both == TRUE) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>% 
+  ungroup() %>% 
+  ggplot(aes(x=day_relative_to_fmt2,y=dysbiosis_dist, fill = unNeighborClusters))+
+    theme_bw(base_size = 18) +
+      labs(
+       x = NULL,
+       y = "Dysbiosis Distance",
+       tag = "a") +
+    geom_path(data = . %>%
+              filter(NormedDelta < 0),
+              aes(group = study_hostID), color = "grey", alpha = 0.75)+
+    geom_path(data = . %>% 
+                    filter(NormedDelta >= 0),
+              aes(group = study_hostID, color = NormedDelta), alpha = 0.25)+
+    geom_point(pch = 21, size = 3, color = 'black') +
+  geom_smooth(method = "lm",se = FALSE, color = 'black', size = 1)+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors), guide =  "none")+
+  stat_regline_equation(label.x = 0.1, label.y = 1.1, size =4)+
+          scale_color_gradient2(low = "blue",
+                            mid = "yellow",
+                            high = "red",
+                            midpoint = 0.2,
+                            trans = "pseudo_log",
+                            guide = guide_colorbar(barwidth= unit(5, "cm"),
+                                                    title = "Normalized Delta DD"))+
+  facet_wrap(~unNeighborClusters, nrow = 2)+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12,angle = 300, hjust = 0),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+
+
+normDistDiffPrePostMatchFMT %>%
+  filter(fmt_status == "PreFMT") %>% 
+  ggplot(aes(y= NormedDelta, x= experiment_title))+
+  geom_boxplot()+    coord_trans(y = "pseudo_log", ylim = c(-60,1.15))+
+  scale_y_continuous(breaks = c(-50, -25,-10,-5,-2.5,-1,0,1))
+
+
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>%#237 obs
+  kruskal.test(data = ., NormedDelta~experiment_title)->myNormStudyKruskal
+# data:  NormedDelta by unNeighborClusters
+# Kruskal-Wallis chi-squared = 50.558, df = 11, p-value = 4.968e-07
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>%#237 obs
+  kruskal_effsize(data = ., NormedDelta~experiment_title)->myNormStudyEffect
+#0.238
+normDistDiffPrePostMatchFMT  %>% 
+  ungroup() %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  dunn_test(data = ., NormedDelta ~ experiment_title, p.adjust.method = "BH")->StudyNormDunn
+write_tsv(StudyNormDunn, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/StudyNormDunn_090926.tsv", quote ="none")
+
+normDistDiffPrePostMatchFMT  %>% 
+  filter(fmt_status == 'PreFMT') %>% 
+  ggplot(aes(y= NormedDelta, x= experiment_title)) +
+    labs(title = "Normalized Delta Dysbiosis Scores ~ Study",
+       x = "Study",
+       y = "Normalized Change from Baseline (log10 scale)",
+       tag = "d") +  
+  theme_bw(base_size = 18) +
+  geom_boxplot()+
+  geom_point(aes(fill =unNeighborClusters), pch = 21, size =2.5)+
+  stat_compare_means(method = "kruskal.test",label.y = -30, aes(label = paste0("p = ", after_stat(p.format)))) + 
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+    coord_trans(y = "pseudo_log", ylim = c(-60,1.15))+
+  scale_y_continuous(breaks = c(-50, -25,-10,-5,-2.5,-1,0,1))+
+  theme(legend.position="none",
+        axis.title.x = element_text(size = 16),
+        axis.text.x = element_text(size = 12,angle = 300, hjust = 0),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->normStudyBoxNoBar
+normStudyBoxNoBar
+
+StudyNormDunn%>% 
+ggplot(aes(x = group1, y = group2)) +
+      theme_classic(base_size = 18) +
+  geom_tile(aes(fill = statistic), alpha = 0.8)+
+  geom_tile(data = . %>%
+              filter(p.adj.signif == "ns"), fill = "grey")+
+  scale_x_discrete(position = "top")+
+    scale_y_discrete()+
+  geom_text( data = . %>% 
+               filter(p.adj.signif != "ns"),
+             aes(label = p.adj.signif), size = 6)+
+            scale_fill_gradientn(colors = c("blue", "white", "green"),
+                            values = rescale(c(-10,0,10)),
+                            breaks = c(-10,-5, 0, 5, 10),
+                            limits = c(-10, 10),    
+                            oob = scales::squish,
+                            guide = guide_colorbar(barwidth= unit(7, "cm"),
+                                                    title = "Z-Value"))+
+  theme(legend.position="bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12,angle = 60, hjust = 0),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text( size = 18),
+        plot.subtitle = element_text( size = 16),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->normStudySigPlot
+normStudySigPlot
+((normStudyBoxNoBar) | normStudySigPlot)+
+  plot_layout(ncol = 2, widths = c(2.5, 1))->studyBox
+dev.off()
+```
+
+```{r}
+normDistDiffPrePostMatchFMT %>% 
+  filter(fmt_status == "PreFMT") %>% 
+  ggplot(aes(PC1,PC4)) +
+    theme_bw(base_size = 18) +
+    xlab(unweighted1_xaxis) +
+    ylab(unweighted4_yaxis) +
+  labs(tag = "c") +
+    geom_point(aes(fill = unNeighborClusters), pch = 21, size = 3, color = 'black') +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
+            discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors))+
+      geom_point(data = . %>%
+               filter(NormedDelta < 0), color = "grey34",stroke =2.25, pch = 21, size = 3.5)+
+    # geom_point(data = . %>% 
+    #              filter(NormedDelta >= 0),
+    #            aes(color = NormedDelta),stroke =2.25, pch = 21, size = 3) +
+    #         scale_color_gradient2(low = "blue",
+    #                         mid = "yellow",
+    #                         high = "red",
+    #                         midpoint = 0.2,
+    #                         trans = "pseudo_log",
+    #                         guide = guide_colorbar(barwidth= unit(5, "cm"),
+    #                                                 title = "Normalized Delta DD"))+
+                guides(color = "none")+
+          theme(legend.position="right",
+        legend.title = element_blank(),
+        plot.title = element_text( size = 14),
+        plot.subtitle = element_text( size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+```

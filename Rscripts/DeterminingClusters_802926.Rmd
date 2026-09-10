@@ -1,0 +1,1501 @@
+---
+title: "Meta-SS"
+author: "Elena Wall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(broom)
+library(cowplot)
+library(ggplot2)
+library(qiime2R)
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
+library(ggpmisc)
+library(ggforce)
+library(lme4)
+library(viridis)
+library(cluster)
+library(dplyr)
+library(farver)
+library(grateful)
+library(phyloseq)
+library(microshades)
+library(gt)
+library(rcompanion)
+library(speedyseq)
+library(purrr)
+library(patchwork)
+library(ggsignif)
+library(RColorBrewer)
+library(ggnewscale)
+
+library(NbClust)
+library(Silhouette)
+library(proxy)
+
+#cite_packages(output = "paragraph", out.dir = "~/Desktop/Lozupone_022425/Keith/Metaanalysis/")
+```
+
+```{r}
+myMeta <- read_tsv('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/metaMappingEW_KZHFiltered4.tsv')
+
+myMeta <- as_tibble(myMeta)
+colnames(myMeta)[1]<-"SampleID"
+
+```
+Going back to using metadata categories for enterotyping, so will need to use the subsetted core-diversity metrics from the 
+```{r}
+##
+## Unweighted All
+myUnweightUniFullPcoa <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/unweighted_unifrac_pcoa_results.qza')$data
+#get axis info
+unweightUniFullProp <- myUnweightUniFullPcoa$ProportionExplained[1:4]
+
+#unweighted full prepare axis labels 
+unweighted1_xaxis = paste0('PC1 (', round(unweightUniFullProp[1], 3) * 100, '%)')
+unweighted2_yaxis = paste0('PC2 (', round(unweightUniFullProp[2], 3) * 100, '%)')
+unweighted3_yaxis = paste0('PC3 (', round(unweightUniFullProp[3], 3) * 100, '%)')
+unweighted4_yaxis = paste0('PC4 (', round(unweightUniFullProp[4], 3) * 100, '%)')
+
+#turn them into tibbles and stuff
+myUnweightUniFullPcoa <- as_tibble(myUnweightUniFullPcoa$Vectors)
+
+colnames(myUnweightUniFullPcoa)[1] <- 'SampleID'
+colnames(myUnweightUniFullPcoa)[2] <- 'PC1_UnWt'
+colnames(myUnweightUniFullPcoa)[3] <- 'PC2_UnWt'
+colnames(myUnweightUniFullPcoa)[4] <- 'PC3_UnWt'
+colnames(myUnweightUniFullPcoa)[5] <- 'PC4_UnWt'
+
+# reducing data if needed
+myUnweightUniFullPcoa %>% 
+  select(SampleID,PC1_UnWt, PC2_UnWt, PC3_UnWt, PC4_UnWt) ->lessUnweightedPCoA
+
+rm(myUnweightUniFullPcoa, unweightUniFullProp)
+
+myMeta %>% 
+  left_join(lessUnweightedPCoA) ->fullerunWeightUniFullPcoa
+#write_tsv(fullerunWeightUniFullPcoa, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/  unweightedPC123withMeta.tsv", quote = "none")
+```
+use metrics of each clusters fit to set threshold for "well clustered" samples
+within PAM object is a clusinfo data table that can tell max and avg dissimilarity between the observations in the cluster and the cluster's medoid
+also may be useful to use diameter of the cluster (maximal dissimilarity between two observations of the cluster)
+```{r}
+ClusteringSummary <-function(weightClusterNum, ClusterNumString, sil_max, sil_min, neighbor_thresh,unclust_thresh) 
+  {
+
+weightClusterNum$clusinfo->dis
+dis %>% 
+  as.tibble() ->dis
+
+dis %>% 
+  dplyr::summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% 
+  round(., digits = 4)->sum
+
+t(sum)->txSum
+txSum<-as_tibble(txSum, rownames = "metric")
+txSum %>% 
+  filter(metric != "Cluster")->txSum
+colnames(txSum)[2] <- 'mean'
+txSum$mean <- as.character(txSum$mean)
+
+dis$Cluster <- rownames(dis)
+dis$Scheme <- ClusterNumString
+dis$Cluster <-as.numeric(dis$Cluster)
+dis %>%
+  as.tibble() %>% 
+  gather(-Scheme, -Cluster, key=metric, value = unit)->tidyDiss
+
+dis %>% 
+   pull(Cluster, name = Cluster)->labelVector
+
+weightClusterNum$silinfo$widths->AllSilWidths
+AllSilWidths %>% 
+  as.tibble() ->AllSilWidths
+
+weightClusterNum$silinfo$avg.width->AvgSilWidth
+
+sum %>% 
+    mutate(TotalAvgSW = AvgSilWidth)->sum
+
+tidyDiss %>% 
+  ggplot()+
+  geom_point(aes(x=Cluster, y=unit))+
+  scale_x_discrete(limits=labelVector)+
+  facet_wrap(~metric, scale = 'free_y',labeller = as_labeller(c(
+  'av_diss' = "avg. dissimilarity from medoid",
+  'diameter'= "diameter of cluster",
+  'max_diss' ="max. dissimilarity from medoid",
+  'separation' = "min. seperation of two cluster observations",
+  'size' = "number of observations")))+
+  geom_text(data = txSum, aes(x = Inf, y = Inf,
+                              hjust = 1, vjust = 1,
+                              label = mean))+
+  ggtitle(ClusterNumString)->SummaryPlot
+
+AllSilWidths %>%
+  group_by(cluster) %>%
+  dplyr::summarise(mean = mean(sil_width), n = n()) %>% 
+  mutate(isLow = mean < 0.1) %>% 
+  mutate(label =paste(cluster, "(",n,")", ":", mean))->OrigAvgSil
+ 
+percentLow <- (sum(OrigAvgSil$isLow))/(max(row_number(OrigAvgSil)))
+
+OrigAvgSil %>% 
+   pull(label, name = cluster)->labelOrig
+
+weightClusterNum$silinfo$widths->AllSilWidths
+AllSilWidths<-as_tibble(AllSilWidths, rownames = "SampleID")
+AllSilWidths$cluster <- as.factor(AllSilWidths$cluster)
+AllSilWidths %>% 
+  arrange(cluster,sil_width)->OrderedSilWidths
+
+OrderedSilWidths %>% 
+  mutate(id = row_number()) %>% 
+  ggplot(aes(fill = cluster, x=id, y=sil_width))+
+  geom_col(width = 1)+
+    facet_grid(~cluster, switch = "x", scales = "free_x", space = "free_x") +
+    scale_fill_discrete(labels = labelOrig)+
+    theme_minimal() +
+    theme(axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside") + 
+    xlab("Cluster")+
+  ggtitle(ClusterNumString)->ClusterSil
+
+#make a refined Cluster assignment
+
+OrderedSilWidths %>% 
+  mutate(RefinedClusters = case_when(sil_width < 0.10 ~ "12",
+                             TRUE ~ cluster)) ->RefinedOrdSilWidths
+
+RefinedOrdSilWidths %>% 
+  select(SampleID,RefinedClusters) ->ReDefinedClusters
+
+matchedRedefinedClusters <- ReDefinedClusters[match(rownames(as.matrix(weightClusterNum$diss)), ReDefinedClusters$SampleID), ]
+#cluster 5 maintains only 
+matchedRedefinedClusters %>% 
+  mutate(RefinedClusters = case_when(RefinedClusters == "5" ~ "12",
+                             TRUE ~ RefinedClusters)) %>%  
+   pull(RefinedClusters, name = SampleID) ->namedReAssignmentVector 
+namedReAssignmentVector %>%
+  as.integer()->reAssignmentVector
+
+reClusterSil<- silhouette(reAssignmentVector, weightClusterNum$diss)
+rownames(reClusterSil)<-names(namedReAssignmentVector )
+
+reClusterSil %>% 
+  as_tibble(rownames = "SampleID")->reClusterSWTable
+colnames(reClusterSWTable)[2] <- 'RefinedClusters'
+
+reClusterSWTable$RefinedClusters <- as.factor(reClusterSWTable$RefinedClusters)
+reClusterSWTable %>% 
+    mutate(RefinedClusters = case_when(RefinedClusters == "12" ~ "unClustered",
+                             TRUE ~ RefinedClusters))->reClusterSWTable
+
+levelVector <- c(labelVector, "unClustered")
+
+reClusterSWTable$RefinedClusters<- factor(reClusterSWTable$RefinedClusters, levels = c(levelVector))
+
+reClusterSWTable %>% 
+  arrange(RefinedClusters,sil_width) ->OrdRefSilWidths
+
+OrdRefSilWidths %>%
+  group_by(RefinedClusters) %>%
+  dplyr::summarise(mean = mean(sil_width), n = n()) %>% 
+  mutate(label =paste(RefinedClusters, "(",n,")", ":", mean))->RefinedAvgSil
+
+RefinedAvgSil %>% 
+   pull(label, name = RefinedClusters)->labelRefined
+
+OrdRefSilWidths %>% 
+  mutate(id = row_number()) %>% 
+  ggplot(aes(fill = RefinedClusters, x=id, y=sil_width))+
+  geom_col(width = 1)+
+    facet_grid(~RefinedClusters, switch = "x", scales = "free_x", space = "free_x") +
+    scale_fill_discrete(labels = labelRefined)+
+    theme_minimal() +
+    theme(axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside") + 
+    xlab("RefinedClusters")+
+  ggtitle(ClusterNumString)->RefClusterSil
+
+OrdRefSilWidths %>% 
+  select(SampleID,RefinedClusters) ->ReRefinedClusters
+
+OrdRefSilWidths %>% 
+  filter(RefinedClusters == "unClustered") %>% 
+  select(SampleID)->unClusteredSamples
+
+##make a Neighbor Clustering
+AllSilWidths$neighbor <-as.character(AllSilWidths$neighbor)
+AllSilWidths %>% 
+  mutate(ReNeighborClusters = case_when(
+                            sil_width < sil_max & sil_width > sil_min ~ "12",
+                            sil_width < neighbor_thresh ~  neighbor,
+                             TRUE ~ cluster)) ->RefinedNeighborSilWidths
+
+RefinedNeighborSilWidths %>% 
+  select(SampleID,ReNeighborClusters) ->ReDefNeighborClusters
+
+matchedNeighborClusters <- ReDefNeighborClusters[match(rownames(as.matrix(weightClusterNum$diss)), ReDefNeighborClusters$SampleID), ]
+
+matchedNeighborClusters %>% 
+  mutate(ReNeighborClusters = case_when(#ReNeighborClusters == "5" ~ "12",
+                             TRUE ~ ReNeighborClusters)) %>%  
+   pull(ReNeighborClusters, name = SampleID) ->neighmedAssignmentVector 
+neighmedAssignmentVector  %>%
+  as.integer()->AssignmentVector
+
+NeighborSil<- silhouette(AssignmentVector, weightClusterNum$diss)
+rownames(NeighborSil)<-names(neighmedAssignmentVector )
+
+NeighborSil %>% 
+  as_tibble(rownames = "SampleID")->NeighborSWTable
+colnames(NeighborSWTable)[2] <- 'ReNeighborClusters'
+
+NeighborSWTable$ReNeighborClusters <- as.factor(NeighborSWTable$ReNeighborClusters)
+NeighborSWTable %>% 
+    mutate(ReNeighborClusters = case_when(ReNeighborClusters == "12" ~ "unClustered",
+                             TRUE ~ ReNeighborClusters))->NeighborSWTable
+NeighborSWTable$ReNeighborClusters <- factor(NeighborSWTable$ReNeighborClusters, levels = c(levelVector))
+NeighborSWTable %>% 
+  arrange(ReNeighborClusters,sil_width) ->OrdNeighborNewSWs
+
+OrdNeighborNewSWs %>%
+  group_by(ReNeighborClusters) %>%
+  dplyr::summarise(mean = mean(sil_width), n = n()) %>% 
+  mutate(label =paste(ReNeighborClusters, "(",n,")", ":", mean)) %>% 
+  ungroup()->NeighborAvgSil
+
+NeighborAvgSil %>% 
+   pull(label, name = ReNeighborClusters)->labelNewNeigh
+
+OrdNeighborNewSWs %>% 
+  mutate(id = row_number()) %>% 
+  ggplot(aes(fill = ReNeighborClusters, x=id, y=sil_width))+
+  geom_col(width = 1)+
+    facet_grid(~ReNeighborClusters, switch = "x", scales = "free_x", space = "free_x") +
+    scale_fill_discrete(labels = labelNewNeigh)+
+    theme_minimal() +
+    theme(axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside") + 
+    xlab("ReNeighborClusters")+
+  ggtitle(ClusterNumString)->newNeighborSilPlot
+
+##make poor Neighbors into unclustered
+OrdNeighborNewSWs$neighbor <-as.character(OrdNeighborNewSWs$neighbor)
+OrdNeighborNewSWs %>% 
+  mutate(unNeighborClusters = case_when(sil_width < unclust_thresh & ReNeighborClusters != "unClustered" ~"12",
+                                         ReNeighborClusters == "unClustered" ~ "12",
+                             TRUE ~ ReNeighborClusters)) ->unNeighborSilWidths
+
+unNeighborSilWidths %>% 
+  select(SampleID,unNeighborClusters) ->unClustNeighborClusters
+
+matchedUnNeighborClusters <- unClustNeighborClusters[match(rownames(as.matrix(weightClusterNum$diss)), unClustNeighborClusters$SampleID), ]
+
+matchedUnNeighborClusters %>% 
+   pull(unNeighborClusters, name = SampleID) ->unNeighmedAssignmentVector 
+unNeighmedAssignmentVector  %>%
+  as.integer()->unNeighborAssignmentVector
+
+unNeighborSil<- silhouette(unNeighborAssignmentVector, weightClusterNum$diss)
+rownames(unNeighborSil)<-names(unNeighmedAssignmentVector)
+
+unNeighborSil %>% 
+  as_tibble(rownames = "SampleID")->unNeighborSWTable
+colnames(unNeighborSWTable)[2] <- 'unNeighborClusters'
+
+unNeighborSWTable$unNeighborClusters <- as.factor(unNeighborSWTable$unNeighborClusters)
+unNeighborSWTable %>% 
+    mutate(unNeighborClusters = case_when(unNeighborClusters == "12" ~ "unClustered",
+                             TRUE ~ unNeighborClusters))->unNeighborSWTable
+unNeighborSWTable$unNeighborClusters <- factor(unNeighborSWTable$unNeighborClusters, levels = c(levelVector))
+unNeighborSWTable %>% 
+  arrange(unNeighborClusters,sil_width) ->OrdUnNeighborNewSWs
+
+OrdUnNeighborNewSWs %>%
+  group_by(unNeighborClusters) %>%
+  dplyr::summarise(mean = mean(sil_width), n = n()) %>% 
+  mutate(label =paste(unNeighborClusters, "(",n,")", ":", mean)) %>% 
+  ungroup()->unNeighborAvgSil
+
+unNeighborAvgSil %>% 
+   pull(label, name = unNeighborClusters)->labelUnNeigh
+
+OrdUnNeighborNewSWs %>% 
+  mutate(id = row_number()) %>% 
+  ggplot(aes(fill = unNeighborClusters, x=id, y=sil_width))+
+  geom_col(width = 1)+
+    facet_grid(~unNeighborClusters, switch = "x", scales = "free_x", space = "free_x") +
+    scale_fill_discrete(labels = labelUnNeigh)+
+    theme_minimal() +
+    theme(axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside") + 
+    xlab("redone Neighbor Clusters")+
+  ggtitle(ClusterNumString)->unNeighborSilPlot
+
+OrdUnNeighborNewSWs %>% 
+  filter(unNeighborClusters == "unClustered") %>% 
+  select(SampleID)->lowClusteredSamples
+
+  return(list(SummaryPlot=SummaryPlot,
+              SilhouetteTable=AllSilWidths,
+              AverageSilWidth=OrigAvgSil,
+              DistanceSummary = sum ,
+              SumSpecifics = tidyDiss,
+              PercentLowClusters = percentLow,
+              ClusterSilPlot=ClusterSil,
+              RefinedClustersSil = OrdRefSilWidths,
+              RefClusterSilPlot=RefClusterSil,
+              RefAvgSilWidths=RefinedAvgSil,
+              RedefinedClusters = ReRefinedClusters,
+              NeighborClusterNewSW = OrdNeighborNewSWs,
+              RefNeighborClusterSilPlot=newNeighborSilPlot,
+              RefAvgNeighborSW=NeighborAvgSil,
+              RedefinedNeighborClusters = ReDefNeighborClusters,
+              newSampleList = unClusteredSamples,
+              redoneNeighborsSWs = OrdUnNeighborNewSWs,
+              redoneNeighborsSWPlot = unNeighborSilPlot,
+              redoneNeighborAvgSW=unNeighborAvgSil,
+              lowClustered = lowClusteredSamples))
+}
+```
+
+Dysbio Cluster
+```{r}
+## load in weightUNI dysbio distance matrix
+myWeightUnipreFMTDM <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics_MetaAnalysis_preFMT-1004/weighted_unifrac_distance_matrix.qza')$data
+
+
+#Partitioning (clustering) of the data into k clusters “around medoids”, a more robust version of K-means.
+weightClusterDysbioAdults2 <- pam(myWeightUnipreFMTDM,2, keep.diss = TRUE)
+clusterWeightDysbioAdult2 <- pam(myWeightUnipreFMTDM,2, cluster.only = TRUE)
+
+weightClusterDysbioAdults3 <- pam(myWeightUnipreFMTDM,3, keep.diss = TRUE)
+clusterWeightDysbioAdult3 <- pam(myWeightUnipreFMTDM,3, cluster.only = TRUE)
+
+weightClusterDysbioAdults4 <- pam(myWeightUnipreFMTDM,4, keep.diss = TRUE)
+clusterWeightDysbioAdult4 <- pam(myWeightUnipreFMTDM,4, cluster.only = TRUE)
+
+weightClusterDysbioAdults5 <- pam(myWeightUnipreFMTDM,5, keep.diss = TRUE)
+clusterWeightDysbioAdult5 <- pam(myWeightUnipreFMTDM,5, cluster.only = TRUE)
+
+weightClusterDysbioAdults6 <- pam(myWeightUnipreFMTDM,6, keep.diss = TRUE)
+clusterWeightDysbioAdult6 <- pam(myWeightUnipreFMTDM,6, cluster.only = TRUE)
+
+weightClusterDysbioAdults7 <- pam(myWeightUnipreFMTDM,7, keep.diss = TRUE)
+clusterWeightDysbioAdult7 <- pam(myWeightUnipreFMTDM,7, cluster.only = TRUE)
+
+weightClusterDysbioAdults8 <- pam(myWeightUnipreFMTDM,8, keep.diss = TRUE)
+clusterWeightDysbioAdult8 <- pam(myWeightUnipreFMTDM,8, cluster.only = TRUE)
+
+weightClusterDysbioAdults9 <- pam(myWeightUnipreFMTDM,9, keep.diss = TRUE)
+clusterWeightDysbioAdult9 <- pam(myWeightUnipreFMTDM,9, cluster.only = TRUE)
+
+weightClusterDysbioAdults10 <- pam(myWeightUnipreFMTDM,10, keep.diss = TRUE)
+clusterWeightDysbioAdult10 <- pam(myWeightUnipreFMTDM,10, cluster.only = TRUE)
+
+weightClusterDysbioAdults11 <- pam(myWeightUnipreFMTDM,11, keep.diss = TRUE)
+clusterWeightDysbioAdult11 <- pam(myWeightUnipreFMTDM,11, cluster.only = TRUE)
+
+weightClusterDysbioAdults12 <- pam(myWeightUnipreFMTDM,12, keep.diss = TRUE)
+clusterWeightDysbioAdult12 <- pam(myWeightUnipreFMTDM,12, cluster.only = TRUE)
+
+weightClusterDysbioAdults13 <- pam(myWeightUnipreFMTDM,13, keep.diss = TRUE)
+clusterWeightDysbioAdult13 <- pam(myWeightUnipreFMTDM,13, cluster.only = TRUE)
+
+weightClusterDysbioAdults14 <- pam(myWeightUnipreFMTDM,14, keep.diss = TRUE)
+clusterWeightDysbioAdult14 <- pam(myWeightUnipreFMTDM,14, cluster.only = TRUE)
+
+weightClusterDysbioAdults15 <- pam(myWeightUnipreFMTDM,15, keep.diss = TRUE)
+clusterWeightDysbioAdult15 <- pam(myWeightUnipreFMTDM,15, cluster.only = TRUE)
+
+weightClusterDysbioAdults16 <- pam(myWeightUnipreFMTDM,16, keep.diss = TRUE)
+clusterWeightDysbioAdult16 <- pam(myWeightUnipreFMTDM,16, cluster.only = TRUE)
+
+
+DysbioCluster2Stats<-ClusteringSummary(weightClusterDysbioAdults2, "Clusters_2",NA,NA,NA,NA)
+DysbioCluster3Stats<-ClusteringSummary(weightClusterDysbioAdults3, "Clusters_3",NA,NA,NA,NA)
+DysbioCluster4Stats<-ClusteringSummary(weightClusterDysbioAdults4, "Clusters_4",NA,NA,NA,NA)
+DysbioCluster5Stats<-ClusteringSummary(weightClusterDysbioAdults5, "Clusters_5",NA,NA,NA,NA)
+DysbioCluster6Stats<-ClusteringSummary(weightClusterDysbioAdults6, "Clusters_6",NA,NA,NA,NA)
+DysbioCluster7Stats<-ClusteringSummary(weightClusterDysbioAdults7, "Clusters_7",NA,NA,NA,NA)
+DysbioCluster8Stats<-ClusteringSummary(weightClusterDysbioAdults8, "Clusters_8",NA,NA,NA,NA)
+DysbioCluster9Stats<-ClusteringSummary(weightClusterDysbioAdults9, "Clusters_9",NA,NA,NA,NA)
+DysbioCluster10Stats<-ClusteringSummary(weightClusterDysbioAdults10, "Clusters_10",NA,NA,NA,NA)
+DysbioCluster11Stats<-ClusteringSummary(weightClusterDysbioAdults11, "Clusters_11",NA,NA,NA,NA)
+DysbioCluster12Stats<-ClusteringSummary(weightClusterDysbioAdults12, "Clusters_12",NA,NA,NA,NA)
+DysbioCluster13Stats<-ClusteringSummary(weightClusterDysbioAdults13, "Clusters_13",NA,NA,NA,NA)
+DysbioCluster14Stats<-ClusteringSummary(weightClusterDysbioAdults14, "Clusters_14",NA,NA,NA,NA)
+DysbioCluster15Stats<-ClusteringSummary(weightClusterDysbioAdults15, "Clusters_15",NA,NA,NA,NA)
+DysbioCluster16Stats<-ClusteringSummary(weightClusterDysbioAdults16, "Clusters_16",NA,NA,NA,NA)
+```
+
+```{r, fig.width=13, fig.height =6}
+Dysbio2<-DysbioCluster2Stats$DistanceSummary
+Dysbio2$DysbioClusters <- "2"
+Dysbio3<-DysbioCluster3Stats$DistanceSummary
+Dysbio3$DysbioClusters <- "3"
+Dysbio4<-DysbioCluster4Stats$DistanceSummary
+Dysbio4$DysbioClusters <- "4"
+Dysbio5<-DysbioCluster5Stats$DistanceSummary
+Dysbio5$DysbioClusters <- "5"
+Dysbio6<-DysbioCluster6Stats$DistanceSummary
+Dysbio6$DysbioClusters <- "6"
+Dysbio7<-DysbioCluster7Stats$DistanceSummary
+Dysbio7$DysbioClusters <- "7"
+Dysbio8<-DysbioCluster8Stats$DistanceSummary
+Dysbio8$DysbioClusters <- "8"
+Dysbio9<-DysbioCluster9Stats$DistanceSummary
+Dysbio9$DysbioClusters <- "9"
+Dysbio10<-DysbioCluster10Stats$DistanceSummary
+Dysbio10$DysbioClusters <- "10"
+Dysbio11<-DysbioCluster11Stats$DistanceSummary
+Dysbio11$DysbioClusters <- "11"
+Dysbio12<-DysbioCluster12Stats$DistanceSummary
+Dysbio12$DysbioClusters <- "12"
+Dysbio13<-DysbioCluster13Stats$DistanceSummary
+Dysbio13$DysbioClusters <- "13"
+Dysbio14<-DysbioCluster14Stats$DistanceSummary
+Dysbio14$DysbioClusters <- "14"
+Dysbio15<-DysbioCluster15Stats$DistanceSummary
+Dysbio15$DysbioClusters <- "15"
+Dysbio16<-DysbioCluster16Stats$DistanceSummary
+Dysbio16$DysbioClusters <- "16"
+
+lowList<-c(DysbioCluster2Stats$PercentLowClusters,
+           DysbioCluster3Stats$PercentLowClusters,
+          DysbioCluster4Stats$PercentLowClusters,
+          DysbioCluster5Stats$PercentLowClusters,
+          DysbioCluster6Stats$PercentLowClusters,
+          DysbioCluster7Stats$PercentLowClusters,
+          DysbioCluster8Stats$PercentLowClusters,
+          DysbioCluster9Stats$PercentLowClusters,
+          DysbioCluster10Stats$PercentLowClusters,
+          DysbioCluster11Stats$PercentLowClusters,
+          DysbioCluster12Stats$PercentLowClusters,
+          DysbioCluster13Stats$PercentLowClusters,
+          DysbioCluster14Stats$PercentLowClusters,
+          DysbioCluster15Stats$PercentLowClusters,
+          DysbioCluster16Stats$PercentLowClusters)
+
+DysbioClusters<-c("2","3","4","5","6",
+              "7","8","9","10","11",
+              "12","13","14","15","16")
+
+lowTableDysbio<-tibble(DysbioClusters,lowList)
+
+Dysbio2 %>% 
+  full_join(Dysbio3) %>% 
+  full_join(Dysbio4) %>% 
+  full_join(Dysbio5) %>% 
+  full_join(Dysbio6) %>% 
+  full_join(Dysbio7) %>% 
+  full_join(Dysbio8) %>% 
+  full_join(Dysbio9) %>% 
+  full_join(Dysbio10) %>% 
+  full_join(Dysbio11) %>% 
+  full_join(Dysbio12) %>% 
+  full_join(Dysbio13) %>% 
+  full_join(Dysbio14) %>% 
+  full_join(Dysbio15)%>% 
+  full_join(Dysbio16)->DysbioStats
+
+lowTableDysbio %>% 
+  left_join(DysbioStats) ->DysbioSummaryTable
+
+write_tsv(DysbioSummaryTable, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/dysbioLowList_082926.tsv", quote = "none")
+#11 has the lower Percent (.18) of clusters with avg sil widths less than 0.1
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysbioClusterSummary_082926.pdf", width = 13, height = 11)
+DysbioCluster2Stats$SummaryPlot
+DysbioCluster6Stats$SummaryPlot
+DysbioCluster5Stats$SummaryPlot
+DysbioCluster11Stats$SummaryPlot
+DysbioCluster12Stats$SummaryPlot
+DysbioCluster10Stats$SummaryPlot
+DysbioCluster2Stats$ClusterSilPlot
+DysbioCluster6Stats$ClusterSilPlot
+DysbioCluster5Stats$ClusterSilPlot
+DysbioCluster11Stats$ClusterSilPlot
+DysbioCluster12Stats$ClusterSilPlot
+DysbioCluster10Stats$ClusterSilPlot
+DysbioCluster2Stats$RefClusterSilPlot
+DysbioCluster6Stats$RefClusterSilPlot
+DysbioCluster5Stats$RefClusterSilPlot
+DysbioCluster11Stats$RefClusterSilPlot
+DysbioCluster12Stats$RefClusterSilPlot
+DysbioCluster10Stats$RefClusterSilPlot
+DysbioCluster2Stats$RefNighborClusterSilPlot
+DysbioCluster11Stats$RefNighborClusterSilPlot
+DysbioCluster12Stats$RefNighborClusterSilPlot
+DysbioCluster10Stats$RefNighborClusterSilPlot
+DysbioCluster6Stats$RefNighborClusterSilPlot
+DysbioCluster5Stats$RefNighborClusterSilPlot
+dev.off()
+
+allSumSpecifix<-dplyr::bind_rows(DysbioCluster2Stats$SumSpecifics,
+                      DysbioCluster3Stats$SumSpecifics,
+                      DysbioCluster4Stats$SumSpecifics,
+                      DysbioCluster5Stats$SumSpecifics,
+                      DysbioCluster6Stats$SumSpecifics,
+                      DysbioCluster7Stats$SumSpecifics,
+                      DysbioCluster8Stats$SumSpecifics,
+                      DysbioCluster9Stats$SumSpecifics,
+                      DysbioCluster10Stats$SumSpecifics,
+                      DysbioCluster11Stats$SumSpecifics,
+                      DysbioCluster12Stats$SumSpecifics,
+                      DysbioCluster13Stats$SumSpecifics,
+                      DysbioCluster14Stats$SumSpecifics,
+                      DysbioCluster15Stats$SumSpecifics,
+                      DysbioCluster16Stats$SumSpecifics)
+
+allSumSpecifix$Cluster<-as.factor(allSumSpecifix$Cluster)
+
+allSumSpecifix %>% 
+  filter(Scheme == "Clusters_2" | Scheme == "Clusters_11") %>%
+  filter(metric != "size") %>% 
+  ggplot(aes(x=Cluster, y=unit, fill=Scheme))+
+  theme_bw(base_size = 18) +
+      labs(tag = "b") +
+  geom_bar(stat="identity", position=position_dodge())+
+  facet_wrap(~metric, scale = "free_y")+
+            scale_fill_discrete(palette = c("grey", "black"))+
+  theme(legend.position="none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->SchemeStats
+
+
+
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysbioSumSpecifics_082926.pdf", width = 13, height = 11)
+SchemeStats
+dev.off()
+
+rm(Dysbio2, clusterWeightDysbioAdult2, weightClusterDysbioAdults2,
+   Dysbio3,DysbioCluster3Stats,clusterWeightDysbioAdult3, weightClusterDysbioAdults3,
+   Dysbio4,DysbioCluster4Stats,clusterWeightDysbioAdult4, weightClusterDysbioAdults4,
+   Dysbio5,DysbioCluster5Stats,clusterWeightDysbioAdult5, weightClusterDysbioAdults5,
+   Dysbio6,DysbioCluster6Stats,clusterWeightDysbioAdult6, weightClusterDysbioAdults6,
+   Dysbio7,DysbioCluster7Stats,clusterWeightDysbioAdult7, weightClusterDysbioAdults7,
+   Dysbio8,DysbioCluster8Stats,clusterWeightDysbioAdult8, weightClusterDysbioAdults8,
+   Dysbio9,DysbioCluster9Stats,clusterWeightDysbioAdult9, weightClusterDysbioAdults9,
+   Dysbio10,DysbioCluster10Stats,clusterWeightDysbioAdult10, weightClusterDysbioAdults10,
+  Dysbio11,DysbioCluster11Stats,clusterWeightDysbioAdult11, weightClusterDysbioAdults11,
+   Dysbio12,DysbioCluster12Stats,clusterWeightDysbioAdult12, weightClusterDysbioAdults12,
+   Dysbio13,DysbioCluster13Stats,clusterWeightDysbioAdult13, weightClusterDysbioAdults13,
+   Dysbio14,DysbioCluster14Stats,clusterWeightDysbioAdult14, weightClusterDysbioAdults14,
+   Dysbio15,DysbioCluster15Stats,clusterWeightDysbioAdult15, weightClusterDysbioAdults15,
+   Dysbio16,DysbioCluster16Stats,clusterWeightDysbioAdult16, weightClusterDysbioAdults16
+)
+
+print(DysbioSummaryTable)
+print(SchemeStats)
+
+DysbioSummaryTable %>% 
+  mutate(across(where(is.numeric), round, digits = 2)) %>% 
+  relocate(TotalAvgSW, .before = lowList)->SuppFig5SumTb
+
+wrap_table(SuppFig5SumTb, panel = "body", space = "fixed") + SchemeStats ->SuppFig5Top
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/SuppFig5Top_082926.pdf", width = 11, height = 8.5)
+SuppFig5Top
+dev.off()
+
+```
+
+After determining 11 is the lowest %
+```{r}
+weightClusterDysbioAdults11 <- pam(myWeightUnipreFMTDM,11, keep.diss = TRUE)
+clusterWeightDysbioAdult11 <- pam(myWeightUnipreFMTDM,11, cluster.only = TRUE)
+DysbioCluster11Stats<-ClusteringSummary(weightClusterDysbioAdults11, "Clusters_11",NA, NA, 0,0.03)#this one looks good
+
+
+set.seed(91)
+Viridiff <- viridis(555, option = "A") #choose a large number of hexcodes from a color pallette
+DysbioColors <- sprintf("%s", sample(Viridiff, 12))
+DysbioColors <- setNames(DysbioColors, labelVectorRedo)
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11ClusterSummaryToggle_082926.pdf", width = 13, height = 11)
+DysbioCluster11Stats$SummaryPlot
+DysbioCluster11Stats$ClusterSilPlot
+DysbioCluster11Stats$RefClusterSilPlot
+DysbioCluster11Stats$RefNeighborClusterSilPlot
+DysbioCluster11Stats$redoneNeighborsSWPlot
+dev.off()
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/2and11SilPlotOverlayed_082926.pdf", width = 13, height = 11)
+DysbioCluster2Stats$SilhouetteTable %>%
+  mutate(id = row_number()) %>% 
+  ggplot(aes(x=id, y=sil_width))+
+  ggtitle("Comparing SWs for 2 Clusters and Neighbor Clusters by Cluster") +
+  geom_col(width = 1, fill = "grey")+
+  geom_col(data = DysbioCluster11Stats$SilhouetteTable %>%
+             arrange(cluster,desc(sil_width)) %>% 
+  mutate(id = row_number()),width = 1, fill = "black", alpha =0.8)+
+  geom_col(data = DysbioCluster11Stats$redoneNeighborsSWs %>%
+             arrange(unNeighborClusters,desc(sil_width)) %>% 
+  mutate(id = row_number()),width = 1, fill = "red", alpha =0.7)+
+    theme_minimal() +
+    theme(
+    panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside") + 
+    xlab("SimpleID")
+
+DysbioCluster2Stats$SilhouetteTable %>%
+  mutate(id = row_number()) %>% 
+  ggplot(aes(x=id, y=sil_width))+
+  ggtitle("Comparing SWs for 2 Clusters and Neighbor Clusters by Sample SW") +
+  geom_col(width = 1, fill = "grey")+
+  geom_col(data = DysbioCluster11Stats$SilhouetteTable %>%
+             arrange(desc(sil_width)) %>% 
+  mutate(id = row_number()),width = 1, fill = "black", alpha =0.8)+
+  geom_col(data = DysbioCluster11Stats$redoneNeighborsSWs %>%
+             arrange(desc(sil_width)) %>% 
+  mutate(id = row_number()),width = 1, fill = "red", alpha =0.7)+
+    theme_minimal() +
+    theme(
+    panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside") + 
+    xlab("SimpleID")
+dev.off()
+```
+
+```{r, fig.width=13, fig.height=5}
+DysbioCluster11Stats$SilhouetteTable %>%
+  group_by(cluster) %>%
+  dplyr::summarise(mean = round(mean(sil_width), digits = 4), n = n()) %>% 
+  mutate(label =paste(cluster, "(",n,")", ":", mean))->OrigAvgSil
+
+OrigAvgSil %>% 
+   pull(label, name = cluster)->labelOrig
+
+DysbioCluster11Stats$redoneNeighborsSWs %>%
+  group_by(unNeighborClusters) %>%
+  dplyr::summarise(mean = round(mean(sil_width), digits = 4), n = n()) %>% 
+  mutate(label =paste(unNeighborClusters, "(",n,")", ":", mean)) %>% 
+  ungroup()->NeighborAvgSil
+
+NeighborAvgSil %>% 
+   pull(label, name = unNeighborClusters)->Neighborlabel
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ComparingClusterSWs_082926.pdf", width = 13, height = 8)
+DysbioCluster11Stats$SilhouetteTable %>%
+  mutate(id = row_number()) %>% 
+  ggplot(aes(fill= cluster, x=id, y=sil_width))+
+  geom_col(color = "black", linewidth = 0.13, width = 2)+
+  facet_grid(~cluster, switch = "x", scales = "free_x", space = "free_x") +
+  discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+               labels = labelOrig)+
+    theme_bw(base_size = 18) +
+  labs(x = "Samples in Clusters",
+       y = "Silhouette Width",
+       tag =  "c")+
+            theme(legend.position = "right",
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_blank(),
+                axis.tick.x = element_blank(),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0),
+                panel.spacing = unit(0, "lines"), 
+                strip.background = element_blank(),
+                strip.placement = "outside")+
+      scale_y_continuous(limits = c(-0.5,0.6))+
+DysbioCluster11Stats$redoneNeighborsSWs %>%
+  group_by(unNeighborClusters) %>% 
+  arrange(desc(sil_width)) %>% 
+  mutate(id = row_number()) %>% 
+  ggplot(aes(fill= unNeighborClusters, x=id, y=sil_width))+
+  geom_col(color = "black", linewidth = 0.13, width = 2)+
+  facet_grid(~unNeighborClusters, switch = "x", scales = "free_x", space = "free_x") +
+  discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+               labels = Neighborlabel)+
+    theme_bw(base_size = 18) +
+  labs(x = "Samples in Clusters",
+       y = "Silhouette Width")+
+            theme(legend.position = "right",
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_blank(),
+                axis.tick.x = element_blank(),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0),
+                panel.spacing = unit(0, "lines"), 
+                strip.background = element_blank(),
+                strip.placement = "outside")+
+      scale_y_continuous(limits = c(-0.5,0.6))->ComparingSW
+ComparingSW
+dev.off()
+
+
+NeighborStats<- as.tibble(c(
+AvgSW= DysbioCluster11Stats$SilhouetteTable%>% 
+  dplyr::summarise(mean = mean(sil_width)),
+NeighborAvgSW=DysbioCluster11Stats$NeighborClusterNewSW %>% 
+  dplyr::summarise(mean = mean(sil_width)),
+unNeighborAvgSW=DysbioCluster11Stats$redoneNeighborsSWs%>% 
+  dplyr::summarise(mean = mean(sil_width)),
+AvgCount = DysbioCluster11Stats$redoneNeighborsSWs %>% 
+  group_by(unNeighborClusters) %>% 
+  dplyr::summarise(count = n()) %>% 
+    ungroup() %>% 
+  filter(unNeighborClusters != "unClustered") %>% 
+    dplyr::summarise(avgSize = mean(count)),
+NeighborNoUnclustAvgSW=DysbioCluster11Stats$NeighborClusterNewSW %>% 
+  filter(ReNeighborClusters != "unClustered") %>% 
+  dplyr::summarise(mean = mean(sil_width)),
+unNeighborNoUnclustAvgSW=DysbioCluster11Stats$redoneNeighborsSWs%>% 
+  filter(unNeighborClusters != "unClustered") %>% 
+  dplyr::summarise(mean = mean(sil_width))))
+#write_tsv(NeighborStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/dysbio11AvgSWs_082926.tsv", quote = "none")
+```
+
+going to make a metadata file for Analysis with cluster 11
+```{r}
+data.table::transpose(bind_rows(clusterWeightDysbioAdult11, .id = 'row'),make.names = 'row', keep.names = 'SampleID') ->myWeightClustersDysbioAdult11
+myWeightClustersDysbioAdult11 <- as_tibble(myWeightClustersDysbioAdult11)
+colnames(myWeightClustersDysbioAdult11)[2] <- 'Weight11ClusterDysbio'
+
+myWeightRedefClustersDysbio11 <- as_tibble(DysbioCluster11Stats$RedefinedClusters)
+colnames(myWeightRedefClustersDysbio11)[2] <- 'ReRefNeighbor11ClusterDysbio'
+
+myWeightNeighborClustersDysbio11 <- as_tibble(DysbioCluster11Stats$RedefinedNeighborClusters)
+colnames(myWeightNeighborClustersDysbio11)[2] <- 'Neighbor11ClusterDysbio'
+
+myWeightUnNeighborClustersDysbio11 <- as_tibble(DysbioCluster11Stats$redoneNeighborsSWs)
+myWeightUnNeighborClustersDysbio11 %>% 
+  select(SampleID,unNeighborClusters)->myWeightUnNeighborClustersDysbio11
+ 
+
+myWeightClustersDysbioAdult11 %>%
+  left_join(myWeightRedefClustersDysbio11) %>% 
+  left_join(myWeightNeighborClustersDysbio11)%>% 
+  left_join(myWeightUnNeighborClustersDysbio11)->DysbioClusters
+
+DysbioClusters %>% 
+  rowid_to_column(var = "ID") %>%
+  mutate(SimpleID = paste0("D", ID)) %>% 
+  select(-ID)-> DysbioClusters
+
+write_tsv(DysbioClusters, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/11w5DysbioClusters_082926.tsv", quote = "none")
+
+myMeta %>% 
+  left_join(DysbioClusters)->FullFMTClusterMeta
+write_tsv(FullFMTClusterMeta, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ReClusters3999Dysbio_metaAnalysis_082926.tsv" , quote = "none")
+
+
+fullerunWeightUniFullPcoa %>% 
+  left_join(DysbioClusters)->unWeightUniPcoaRedefDysbio11
+write_tsv(unWeightUniPcoaRedefDysbio11, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/unWeighted3999DysFMTClusters_082926.tsv", quote = "none")
+
+DysbioClusters %>% 
+  left_join(fullerunWeightUniFullPcoa)->onlyRedef11DysbioMeta
+```
+
+assessing the goodness of this process
+```{r}
+DysbioCluster11Stats$SilhouetteTable %>% 
+  filter(sil_width < 0)->initialNeighbors
+#57
+
+DysbioCluster11Stats$NeighborClusterNewSW %>% 
+  filter(sil_width < 0 & ReNeighborClusters != "unClustered")->finalUnClust
+#28
+
+DysbioCluster11Stats$lowClustered ->finalUnClust
+#48
+
+DysbioCluster11Stats$SilhouetteTable %>% 
+  mutate(firstPlacement = case_when(
+                            sil_width < NA & sil_width > NA ~ "unClustered",
+                            sil_width < 0 ~  "neighbor",
+                             TRUE ~ "originalCluster")) ->firstNeighborAssigns
+#count the number of samples that get assigned to neighbor, originalCluster, and unClustered in first round
+firstNeighborAssigns %>% 
+  dplyr::count(firstPlacement)->numberPlacements
+#57 neighbor, 248 originalClusters
+
+#now the new silhouette widths are going to place an additional number of samples into unClustered
+DysbioCluster11Stats$NeighborClusterNewSW %>% 
+  mutate(secondPlacement = case_when(sil_width < 0.03 & ReNeighborClusters != "unClustered" ~ "unClustered",
+                             TRUE ~ "unchanged"))->secondNeighborAssigns
+
+#count the number of samples that get assigned to unClustered in second round and that number added to first neighbor "unClustered" count should equal lowClustered
+secondNeighborAssigns %>% 
+  dplyr::count(secondPlacement)->number2Placements
+#257 unchanged, 48 new Unclustered
+firstNeighborAssigns %>% 
+  select(SampleID,firstPlacement)->firstPlaceIDs
+secondNeighborAssigns %>% 
+  select(SampleID,secondPlacement)->secondPlaceIDs
+
+firstPlaceIDs %>% 
+  left_join(secondPlaceIDs)->placementAssignments
+```
+
+```{r}
+#going to add Weighted PCoA data to each subset
+myWeightUniPcoaDysbio <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics_MetaAnalysis_preFMT-1004/weighted_unifrac_pcoa_results.qza')$data
+#get axis info
+WeightUniFullProp <- myWeightUniPcoaDysbio$ProportionExplained[1:4]
+
+#unweighted full prepare axis labels 
+WeightDys1_xaxis = paste0('PC1 (', round(WeightUniFullProp [1], 3) * 100, '%)')
+WeightDys2_yaxis = paste0('PC2 (', round(WeightUniFullProp [2], 3) * 100, '%)')
+WeightDys3_xaxis = paste0('PC3 (', round(WeightUniFullProp [3], 3) * 100, '%)')
+WeightDys4_yaxis = paste0('PC4 (', round(WeightUniFullProp [4], 3) * 100, '%)')
+
+#turn them into tibbles and stuff
+myWeightUniPcoaDysbio <- as_tibble(myWeightUniPcoaDysbio$Vectors)
+
+colnames(myWeightUniPcoaDysbio)[1] <- 'SampleID'
+colnames(myWeightUniPcoaDysbio)[2] <- 'PC1Dys_Wt'
+colnames(myWeightUniPcoaDysbio)[3] <- 'PC2Dys_Wt'
+colnames(myWeightUniPcoaDysbio)[4] <- 'PC3Dys_Wt'
+colnames(myWeightUniPcoaDysbio)[5] <- 'PC4Dys_Wt'
+
+# reducing data if needed
+myWeightUniPcoaDysbio %>% 
+  select(SampleID,PC1Dys_Wt, PC2Dys_Wt, PC3Dys_Wt, PC4Dys_Wt) ->lessWeighted123PCoADys
+
+rm(myWeightUniPcoaDysbio, WeightUniFullProp)
+
+
+fullerunWeightUniFullPcoa %>% 
+  left_join(lessWeighted123PCoADys) %>% 
+  left_join(DysbioClusters, join_by(SampleID))->metaUnWtUniFullSubWtPcoa
+```
+
+```{r}
+##
+##Health Weight
+myWeightUniPcoaHealth <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/core-metrics_MetaAnalysis_donor-1004/weighted_unifrac_pcoa_results.qza')$data
+#get axis info
+WeightUniFullPropHlth <- myWeightUniPcoaHealth$ProportionExplained[1:3]
+
+#unweighted full prepare axis labels 
+WeightHlth1_xaxis = paste0('PC1 (', round(WeightUniFullPropHlth [1], 3) * 100, '%)')
+WeightHlth2_yaxis = paste0('PC2 (', round(WeightUniFullPropHlth [2], 3) * 100, '%)')
+WeightHlth3_xaxis = paste0('PC2 (', round(WeightUniFullPropHlth [3], 3) * 100, '%)')
+
+#turn them into tibbles and stuff
+myWeightUniPcoaHealth <- as_tibble(myWeightUniPcoaHealth$Vectors)
+
+colnames(myWeightUniPcoaHealth)[1] <- 'SampleID'
+colnames(myWeightUniPcoaHealth)[2] <- 'PC1Hlth_Wt'
+colnames(myWeightUniPcoaHealth)[3] <- 'PC2Hlth_Wt'
+colnames(myWeightUniPcoaHealth)[4] <- 'PC3Hlth_Wt'
+
+# reducing data if needed
+myWeightUniPcoaHealth %>% 
+  select(SampleID,PC1Hlth_Wt, PC2Hlth_Wt, PC3Hlth_Wt) ->lessWeighted123PCoAHlth
+
+rm(myWeightUniPcoaHealth, WeightUniFullPropHlth)
+
+```
+
+
+```{r, fig.width=18, fig.height=8}
+#Dysbio
+metaUnWtUniFullSubWtPcoa$Weight11ClusterDysbio <- as.character(metaUnWtUniFullSubWtPcoa$Weight11ClusterDysbio)
+metaUnWtUniFullSubWtPcoa$ReRefNeighbor11ClusterDysbio <- as.character(metaUnWtUniFullSubWtPcoa$ReRefNeighbor11ClusterDysbio)
+metaUnWtUniFullSubWtPcoa$un<- as.character(metaUnWtUniFullSubWtPcoa$unNeighborClusters)
+
+metaUnWtUniFullSubWtPcoa %>% 
+filter(unNeighborClusters != "NA") %>% 
+  group_by(target_subfragment) %>%
+dplyr::count(unNeighborClusters) ->inforedefinedSubFrag
+
+labelVectorRedo <- setNames(c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, "unClustered"), c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "BTC"))
+
+Viridiff <- viridis(555, option = "A")
+set.seed(94)
+PrimerColors <- sprintf("%s", sample(Viridiff, 6))
+set.seed(91)
+DysbioColors <- sprintf("%s", sample(Viridiff, 12))
+DysbioColors <- setNames(DysbioColors, labelVectorRedo)
+set.seed(99)
+StudyColors <- sprintf("%s", sample(Viridiff, 14))
+set.seed(94)
+HealthColors <- sprintf("%s", sample(Viridiff, 7))
+
+#dysbio
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/subFragmentByNeighborClusterPlot_082926.pdf", width = 13, height = 11)
+inforedefinedSubFrag  %>%   
+  ggplot(aes(fill=target_subfragment, y= n, x= unNeighborClusters)) +
+  theme_bw(base_size = 18) +
+  labs(title = "Samples from Each of 11 Dysbio Clusters",
+       subtitle = "By Subfragment",
+       x = "Cluster",
+       y = "Samples Count",
+       tag = "a")+
+  geom_bar(position="stack", stat="identity",color = "black", linewidth = 0.3,)+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(PrimerColors))+
+        theme(legend.position = "bottom",
+              plot.title = element_text( size = 14),
+                plot.subtitle = element_text( size = 12),
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_text(size = 10),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+    scale_x_discrete(limits=c(1,2,3,4,5,6,7,8,9,10,11,"unClustered"),
+                     labels=labelVectorRedo)->SubFragEffect
+SubFragEffect
+dev.off()
+
+metaUnWtUniFullSubWtPcoa %>% 
+filter(unNeighborClusters != "NA") ->DysbioreRefinedData
+  
+SubfragData<- table(DysbioreRefinedData$unNeighborClusters, DysbioreRefinedData$target_subfragment)
+resultSub <- chisq.test(SubfragData)
+print(resultSub)
+#significant relationship (X-squared = 280.27, df = 55, p-value < 2.2e-16)              
+resultSub$expected
+cramResultSub<-cramerV(SubfragData)
+print(cramResultSub)
+#moderate effect size (0.4287)
+
+metaUnWtUniFullSubWtPcoa %>% 
+filter(unNeighborClusters != "NA") %>% 
+  group_by(experiment_title) %>%
+dplyr::count(unNeighborClusters) ->inforedefinedStudy
+
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/studyByNeighborClusterPlot_082926.pdf", width = 13, height = 11)
+inforedefinedStudy  %>%   
+  ggplot(aes(fill=experiment_title, y= n, x= unNeighborClusters)) +
+  theme_bw(base_size = 18) +
+  labs(title = "Samples from Each of 11 Dysbio Clusters",
+       subtitle = "By Study",
+       x = "Cluster",
+       y = "Samples Count",
+       tag = "b")+
+  geom_bar(position="stack", stat="identity",color = "black", linewidth = 0.3,)+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(StudyColors))+
+        theme(legend.position = "bottom",
+              plot.title = element_text( size = 14),
+                plot.subtitle = element_text( size = 12),
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_text(size = 10),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+    scale_x_discrete(limits=c(1,2,3,4,5,6,7,8,9,10,11,"unClustered"),
+                     labels=labelVectorRedo)->StudyEffect
+StudyEffect
+dev.off()
+
+
+StudyData<- table(DysbioreRefinedData$unNeighborClusters, DysbioreRefinedData$experiment_title)
+resultStudy <- chisq.test(StudyData, simulate.p.value = TRUE)
+print(resultStudy)
+#significant relationship (X-squared = 400.86, df = NA, p-value = 0.0004998)  
+resultStudy$expected
+cramResultStudy<-cramerV(StudyData)
+print(cramResultStudy)
+#moderate effect size (0.3457 )
+
+
+SubFragEffect+StudyEffect->SuppFig6
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/SuppFig6_082926.pdf", width = 11, height = 8.5)
+SuppFig6
+dev.off()
+```
+adonis
+```{r}
+#dysbio
+meta_ordered <- onlyRedef11DysbioMeta[match(rownames(as.matrix(myWeightUnipreFMTDM)), onlyRedef11DysbioMeta$SampleID), ]
+#304 PreFMT samples
+meta_ordered$experiment_title <- factor(meta_ordered$experiment_title)
+meta_ordered$target_subfragment <- factor(meta_ordered$target_subfragment)
+meta_ordered$unNeighborClusters <- factor(meta_ordered$unNeighborClusters)
+
+#does cluster explain variation, what do others explain
+adonic_result <- adonis2(
+                        myWeightUnipreFMTDM ~ target_subfragment + experiment_title + unNeighborClusters,
+                        data = meta_ordered,
+                        permutations =  999,
+                        by = "terms")
+#does cluster explain variation after correcting for study
+adonic_result2 <- adonis2(
+                        myWeightUnipreFMTDM ~ experiment_title + target_subfragment + unNeighborClusters,
+                        data = meta_ordered,
+                        by = "margin")
+DysbioAdonis<-rownames_to_column(adonic_result2, "variable")
+#R2 went up to .42 from .38 after neighbors reassignment for Samples, but also putting the 3 samples in cluster 5 in unClustered
+#R2 went up to .45 from .42 after neighbors reassignment for SW <0, keeping 5, and then assigning SW<0.03 to unclust
+write_tsv(DysbioAdonis, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11NeighborClusterAdonis_082926.tsv", quote = "none")
+```
+
+
+```{r}
+dysbioDist <- read_tsv('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/MetaSampleDysbioDistances_083126.tsv')
+
+#Attaching dysbio distances onto lotsa meta data
+metaUnWtUniFullSubWtPcoa%>% 
+  left_join(dysbioDist)->metaUnWtUniFullSubWtPcoaDD
+
+metaUnWtUniFullSubWtPcoaDD %>% 
+  filter(unNeighborClusters != 'NA') %>% 
+    group_by(unNeighborClusters) %>% 
+    summarise(medianDysDist = median(dysbiosis_dist), mean = mean(dysbiosis_dist), 
+              minimum = min(dysbiosis_dist), maximum = max(dysbiosis_dist),
+              IQR = IQR(dysbiosis_dist), sd = sd(dysbiosis_dist), n = n())-> Dys11DstanceAvgs
+
+#write_tsv(Dys11DstanceAvgs, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11w5DistanceSumTab_083126.tsv", quote = "none")
+
+#dysbio 11 redo
+centersUnWt<- aggregate(cbind(PC1_UnWt, PC2_UnWt) ~ unNeighborClusters, data=metaUnWtUniFullSubWtPcoaDD, FUN=mean)
+centersWt <- aggregate(cbind(PC2Dys_Wt,PC1Dys_Wt) ~ unNeighborClusters, data=metaUnWtUniFullSubWtPcoaDD, FUN=mean)
+centersWt %>% 
+  left_join(centersUnWt) %>% 
+  left_join(Dys11DstanceAvgs)->CentersAvgTabel
+
+colnames(CentersAvgTabel)[2] <- 'PC2Dys_WtAv'
+colnames(CentersAvgTabel)[3] <- 'PC1Dys_WtAv'
+colnames(CentersAvgTabel)[4] <- 'PC1Dys_UnWtAv'
+colnames(CentersAvgTabel)[5] <- 'PC2Dys_UnWtAv'
+```
+
+
+```{r, fig.width=13, fig.height=7}
+metaUnWtUniFullSubWtPcoa %>%
+  left_join(placementAssignments) %>% 
+   ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(WeightDys1_xaxis) +
+    ylab(WeightDys2_yaxis) +
+  ggtitle("Weighted Meta-analysis Placement Assignments of Dysbiotic Enterotypes") +
+    geom_point(data = metaUnWtUniFullSubWtPcoa %>% 
+               filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt,fill = unNeighborClusters),alpha = 0.4, pch = 21, size = 7) +
+        discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = labelVectorRedo)+
+              new_scale_fill() +
+    geom_point(data = . %>% 
+               filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt, fill = firstPlacement), pch = 21, size = 3) +
+  scale_fill_discrete(palette = c("black","white"))+
+    geom_point(data = . %>% 
+               filter(secondPlacement == "unClustered"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt),pch = 21, fill = "red", size = 3)
+
+
+metaUnWtUniFullSubWtPcoa %>%
+  left_join(placementAssignments) %>% 
+   ggplot() +
+    theme_bw(base_size = 18) +
+    xlab(WeightDys1_xaxis) +
+    ylab(WeightDys2_yaxis) +
+  ggtitle("Weighted Meta-analysis Placement Assignments of Dysbiotic Enterotypes") +
+         geom_point(data = CentersAvgTabel %>%
+                group_by(unNeighborClusters), 
+                aes(y= PC2Dys_WtAv, x= PC1Dys_WtAv, fill=unNeighborClusters),
+                    pch = 21, size = 15, alpha = 0.3)+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(DysbioColors),
+                labels = labelVectorRedo)+
+    geom_point(data = . %>% 
+               filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt, shape = firstPlacement, fill = unNeighborClusters), size = 3, alpha = 0.4) + 
+    scale_shape_manual(values=c(25,21,8))+
+    geom_point(data = . %>% 
+               filter(secondPlacement == "unClustered"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt), color = "red", shape = 4, size = 3)
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/w5NeighborUnclustAssignments_083126.pdf", width = 13, height = 8.5)
+metaUnWtUniFullSubWtPcoa %>%
+   left_join(placementAssignments) %>% 
+    ggplot() +
+  labs(title = "Weighted Meta-analysis Placement Assignments",
+       x = WeightDys1_xaxis,
+       y = WeightDys2_yaxis,
+       tag = "b")+
+     theme_bw(base_size = 18) +
+       geom_point(data = . %>% 
+                filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt, shape = firstPlacement), color = "black", stroke =0.3, size = 4.5)+ 
+     geom_point(data = . %>% 
+                filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt, shape = firstPlacement, color = unNeighborClusters),stroke =1.25, size = 3) + 
+         geom_point(data = . %>% 
+                filter(unNeighborClusters != "NA"),
+               aes(y= PC2Dys_Wt, x= PC1Dys_Wt, shape = firstPlacement), color = "black",stroke =0.3,size = 2.5)+ 
+    discrete_scale(aesthetics = "color",
+          palette = function(x) c(DysbioColors),
+          labels = labelVectorRedo)+
+     scale_shape_manual(values=c(25,21,8))+
+          theme(legend.position = "right",
+              plot.title = element_text( size = 14),
+                plot.subtitle = element_text( size = 12),
+                legend.text = element_text(size = 10),
+                legend.title = element_text(size = 12),
+                axis.title.x = element_text(size = 12),
+                axis.text.x = element_text(size = 10),
+                axis.title.y = element_text(size = 12),
+                axis.text.y = element_text(size = 10),
+                legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+     geom_point(data = . %>% 
+                filter(secondPlacement == "unClustered"),
+                aes(y= PC2Dys_Wt, x= PC1Dys_Wt), color = "red", shape = 4, size = 3)->PlacementFig
+PlacementFig
+dev.off()
+```
+
+```{r, fig.width=15, fig.height=12}
+
+SuppFig5Top/PlacementFig/ComparingSW->SuppFig5
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig5_072326.pdf", width = 15, height = 12)
+SuppFig5
+dev.off()
+```
+```{r}
+weightClusterDysbioAdults11 <- pam(myWeightUnipreFMTDM,11, keep.diss = TRUE)
+weightClusterDysbioAdults11$medoids->medoids11
+```
+Healthy things
+clustering Healthy Adults
+Keep note that Sample ID SRR1169808 from  Seekatz454 is labelled as both preFMT and healthy adult! And therefore is clustered for both health and dysbio. Check it out to find out what is up
+```{r}
+## load in weightUNI distance matrix
+myWeightUniHealthAdultsDM <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/core-metrics_MetaAnalysis_donor-1004/weighted_unifrac_distance_matrix.qza')$data
+
+## Use the silhouette widths for assessing the best number of clusters,
+## following a one-dimensional example from Christian Hennig :
+## this is in the cluster PDF
+
+#Partitioning (clustering) of the data into k clusters “around medoids”, a more robust version of K-means.
+weightClusterHealthAdults2 <- pam(myWeightUniHealthAdultsDM,2, keep.diss = TRUE)
+clusterWeightHealthAdult2 <- pam(myWeightUniHealthAdultsDM,2, cluster.only = TRUE)
+weightClusterHealthAdults3 <- pam(myWeightUniHealthAdultsDM,3, keep.diss = TRUE)
+clusterWeightHealthAdult3 <- pam(myWeightUniHealthAdultsDM,3, cluster.only = TRUE)
+weightClusterHealthAdults4 <- pam(myWeightUniHealthAdultsDM,4, keep.diss = TRUE)
+clusterWeightHealthAdult4 <- pam(myWeightUniHealthAdultsDM,4, cluster.only = TRUE)
+
+weightClusterHealthAdults5 <- pam(myWeightUniHealthAdultsDM,5, keep.diss = TRUE)
+clusterWeightHealthAdult5 <- pam(myWeightUniHealthAdultsDM,5, cluster.only = TRUE)
+weightClusterHealthAdults6 <- pam(myWeightUniHealthAdultsDM,6, keep.diss = TRUE)
+clusterWeightHealthAdult6 <- pam(myWeightUniHealthAdultsDM,6, cluster.only = TRUE)
+weightClusterHealthAdults7 <- pam(myWeightUniHealthAdultsDM,7, keep.diss = TRUE)
+clusterWeightHealthAdult7 <- pam(myWeightUniHealthAdultsDM,7, cluster.only = TRUE)
+
+weightClusterHealthAdults8 <- pam(myWeightUniHealthAdultsDM,8, keep.diss = TRUE)
+clusterWeightHealthAdult8 <- pam(myWeightUniHealthAdultsDM,8, cluster.only = TRUE)
+
+HealthCluster2Stats<-ClusteringSummary(weightClusterHealthAdults2, "Clusters_2")
+HealthCluster3Stats<-ClusteringSummary(weightClusterHealthAdults3, "Clusters_3")
+HealthCluster4Stats<-ClusteringSummary(weightClusterHealthAdults4, "Clusters_4")
+HealthCluster5Stats<-ClusteringSummary(weightClusterHealthAdults5, "Clusters_5")
+HealthCluster6Stats<-ClusteringSummary(weightClusterHealthAdults6, "Clusters_6")
+HealthCluster7Stats<-ClusteringSummary(weightClusterHealthAdults7, "Clusters_7")
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/HealthyClusterSummary_051126.pdf", width = 13, height = 11)
+HealthCluster2Stats$SummaryPlot
+HealthCluster3Stats$SummaryPlot
+HealthCluster4Stats$SummaryPlot
+HealthCluster7Stats$SummaryPlot
+HealthCluster2Stats$ClusterSilPlot
+HealthCluster3Stats$ClusterSilPlot
+HealthCluster4Stats$ClusterSilPlot
+HealthCluster7Stats$ClusterSilPlot
+HealthCluster2Stats$RefClusterSilPlot
+HealthCluster3Stats$RefClusterSilPlot
+HealthCluster4Stats$RefClusterSilPlot
+HealthCluster7Stats$RefClusterSilPlot
+dev.off()
+
+health2<-HealthCluster2Stats$DistanceSummary
+health2$HealthClusters <- "2"
+health3<-HealthCluster3Stats$DistanceSummary
+health3$HealthClusters <- "3"
+health4<-HealthCluster4Stats$DistanceSummary
+health4$HealthClusters <- "4"
+
+health5<-HealthCluster5Stats$DistanceSummary
+health5$HealthClusters <- "5"
+health6<-HealthCluster6Stats$DistanceSummary
+health6$HealthClusters <- "6"
+health7<-HealthCluster7Stats$DistanceSummary
+health7$HealthClusters <- "7"
+
+lowList<-c(HealthCluster2Stats$PercentLowClusters,
+           HealthCluster3Stats$PercentLowClusters,
+          HealthCluster4Stats$PercentLowClusters,
+          HealthCluster5Stats$PercentLowClusters,
+           HealthCluster6Stats$PercentLowClusters,
+          HealthCluster7Stats$PercentLowClusters)
+
+HealthClusters<-c("2","3","4","5","6","7")
+
+lowTable<-tibble(HealthClusters,lowList)
+health2 %>% 
+  full_join(health3) %>% 
+  full_join(health4)%>% 
+  full_join(health5)%>% 
+  full_join(health6)%>% 
+  full_join(health7) ->healthStats
+
+lowTable %>% 
+  left_join(healthStats) ->HlthSummaryTable
+#3 has the lower Percent (.33) of clusters with avg sil widths less than 0.1
+#But also if you add cluster schemes 5,6,7 the percLow goes down consistently and seven seems best
+
+#write_tsv(HlthSummaryTable, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/healthSummaryList_051126.tsv", quote = "none")
+
+#choose clustering scheme with lowest percentage of clusters that have avg. silhouette width <0.1. Remove other files
+
+rm(health2,HealthCluster2Stats, myWeightClustersHealthAdult2, weightClusterHealthAdults2,
+   health5,HealthCluster5Stats, myWeightClustersHealthAdult5, weightClusterHealthAdults5,
+   health6,HealthCluster6Stats, myWeightClustersHealthAdult6, weightClusterHealthAdults6)
+
+#3
+data.table::transpose(bind_rows(clusterWeightHealthAdult3, .id = 'row'),make.names = 'row', keep.names = 'SampleID') ->myWeightClustersHealthAdult3
+myWeightClustersHealthAdult3 <- as_tibble(myWeightClustersHealthAdult3)
+colnames(myWeightClustersHealthAdult3)[2] <- 'Weight3ClusterHealth'
+#get Redefined Clusters
+myWeightReClustersHealth3 <- as_tibble(HealthCluster3Stats$RedefinedClusters)
+colnames(myWeightReClustersHealth3)[2] <- 'RedefWeight3ClusterHealth'
+#4
+data.table::transpose(bind_rows(clusterWeightHealthAdult4, .id = 'row'),make.names = 'row', keep.names = 'SampleID') ->myWeightClustersHealthAdult4
+myWeightClustersHealthAdult4 <- as_tibble(myWeightClustersHealthAdult4)
+colnames(myWeightClustersHealthAdult4)[2] <- 'Weight4ClusterHealth'
+#get Redefined Clusters
+myWeightReClustersHealth4 <- as_tibble(HealthCluster4Stats$RedefinedClusters)
+colnames(myWeightReClustersHealth4)[2] <- 'RedefWeight4ClusterHealth'
+#7
+data.table::transpose(bind_rows(clusterWeightHealthAdult7, .id = 'row'),make.names = 'row', keep.names = 'SampleID') ->myWeightClustersHealthAdult7
+myWeightClustersHealthAdult7 <- as_tibble(myWeightClustersHealthAdult7)
+colnames(myWeightClustersHealthAdult7)[2] <- 'Weight7ClusterHealth'
+#get Redefined Clusters
+myWeightReClustersHealth7 <- as_tibble(HealthCluster7Stats$RedefinedClusters)
+colnames(myWeightReClustersHealth7)[2] <- 'RedefWeight7ClusterHealth'
+
+myWeightClustersHealthAdult3 %>% 
+  left_join(myWeightClustersHealthAdult7)%>% 
+  left_join(myWeightClustersHealthAdult4)%>% 
+  left_join(myWeightReClustersHealth3)%>% 
+  left_join(myWeightReClustersHealth7)%>% 
+  left_join(myWeightReClustersHealth4)->EubioTable
+
+EubioTable %>% 
+  rowid_to_column(var = "ID") %>%
+  mutate(SimpleID = paste0("H", ID)) %>% 
+  select(-ID)-> EubioTable
+
+EubioTable %>% 
+    left_join(fullerunWeightUniFullPcoa)->onlyHealthyEnterosMeta
+  
+fullerunWeightUniFullPcoa %>% 
+  left_join(EubioTable) ->unWeightUniPcoaRedefHealth
+#write_tsv(unWeightUniPcoaRedefHealth, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/unWeighted3999HlthFMTClusters_051126.tsv", quote = "none")
+
+```
+Healthy clustering has been a bit confusing - wondering if subsetting further by variable region might help reduce cluster number
+Keith has done this previously and this is his code 
+Create two groups for analysis. The V1-4 group and the V5-7 group as they separate nicely on the PCoA plot
+```{r}
+# #create character vectors of V1-4 group and V5-7 group
+# high <- c("V5-V7", "V6", "V5-V6", "V3-V5")
+# low <- c("V3-V4","V1-V3","V4","V2","V3")
+# 
+# #create tibbles of high and low groups
+# plot_high <- test %>% filter(exp_type == "FMT" & fmt_status %in% c("donor", "PostFMT", "PreFMT") & target_subfragment %in% high)
+# plot_low <- test %>% filter(exp_type == "FMT" & fmt_status %in% c("donor", "PostFMT", "PreFMT") & target_subfragment %in% low)
+# 
+# #re-leveling factors to fix colors below
+# plot_high <- plot_high %>% mutate(fmt_status = fct_relevel(fmt_status, "donor", "PostFMT", "PreFMT"))
+# plot_low <- plot_low %>% mutate(fmt_status = fct_relevel(fmt_status, "donor", "PostFMT", "PreFMT"))
+
+```
+is this clustering a batch effect, host_subject_id effect, study effect?
+```{r}
+# metaUnWtUniFullSubWtPcoa$RedefWeight3ClusterHealth<- as.character(metaUnWtUniFullSubWtPcoa$RedefWeight3ClusterHealth)
+# metaUnWtUniFullSubWtPcoa$Weight3ClusterHealth<- as.character(metaUnWtUniFullSubWtPcoa$Weight3ClusterHealth)
+# metaUnWtUniFullSubWtPcoa$Weight4ClusterHealth <- as.character(metaUnWtUniFullSubWtPcoa$Weight4ClusterHealth)
+# metaUnWtUniFullSubWtPcoa$Weight7ClusterHealth <- as.character(metaUnWtUniFullSubWtPcoa$Weight7ClusterHealth)
+# metaUnWtUniFullSubWtPcoa$RedefWeight7ClusterHealth<- as.character(metaUnWtUniFullSubWtPcoa$RedefWeight7ClusterHealth)
+# metaUnWtUniFullSubWtPcoa$RedefWeight4ClusterHealth<- as.character(metaUnWtUniFullSubWtPcoa$RedefWeight4ClusterHealth)
+# #newEub
+# metaUnWtUniFullSubWtPcoa$Weight2ClusterHealth<- as.character(metaUnWtUniFullSubWtPcoa$Weight2ClusterHealth)
+# metaUnWtUniFullSubWtPcoa$unNeighborWeight2ClusterHealth<- as.character(metaUnWtUniFullSubWtPcoa$unNeighborWeight2ClusterHealth)
+# 
+# metaUnWtUniFullSubWtPcoa$unNeighborH2Hazleton <- as.character(metaUnWtUniFullSubWtPcoa$unNeighborH2Hazleton)
+# 
+# metaUnWtUniFullSubWtPcoa$unNeighborH2KhannaK <- as.character(metaUnWtUniFullSubWtPcoa$unNeighborH2KhannaK)
+# 
+# metaUnWtUniFullSubWtPcoa$unNeighborH3Fricke<- as.character(metaUnWtUniFullSubWtPcoa$unNeighborH3Fricke)
+```
+
+```{r}
+#Healthy
+
+metaUnWtUniFullSubWtPcoa %>% 
+filter(RedefWeight7ClusterHealth != "NA") %>% 
+  group_by(target_subfragment) %>% 
+dplyr::count(RedefWeight7ClusterHealth) ->inforedefinedSubFrag7
+
+labelVectorRedo7 <- setNames(c(2, 3, 4, 6, 7, 'unClustered'), c("2", "3", "4", "6", "7","unClustered"))
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/subFragmentByClusterPlotH7redo.pdf", width = 13, height = 11)
+inforedefinedSubFrag7  %>%   
+  ggplot(aes(fill=target_subfragment, y= n, x= RedefWeight7ClusterHealth)) +
+      ggtitle("Samples from each of 7 redo Healthy clusters by SubFrag") +
+    geom_bar(position="stack", stat="identity")+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(HealthColors))+
+    scale_x_discrete(limits=c(2,3,4,5,6,7,"unClustered"),
+                     labels=labelVectorRedo7)
+
+
+metaUnWtUniFullSubWtPcoa %>% 
+filter(RedefWeight7ClusterHealth != "NA") ->HlthreRefinedData
+  
+SubfragData<- table(HlthreRefinedData$RedefWeight7ClusterHealth, HlthreRefinedData$target_subfragment)
+resultSub <- chisq.test(SubfragData)
+print(resultSub)
+#3 Clusters has significant relationship (X-squared = 348, df = 10, p-value <2e-16) 
+#7 Clusters has significant relationship (X-squared = 704, df = 30, p-value <2e-16)
+#7redo Clusters has significant relationship (X-squared = 478, df = 30, p-value <2e-16)  
+resultSub$expected
+cramResultSub<-cramerV(SubfragData)
+print(cramResultSub)
+#3 Clusters moderate effect size (0.56)
+#7 Clusters moderate effect size (0.5)
+#7redo Clusters moderate effect size (0.41)
+
+metaUnWtUniFullSubWtPcoa %>% 
+filter(RedefWeight7ClusterHealth != "NA") %>% 
+  group_by(experiment_title) %>%
+dplyr::count(RedefWeight7ClusterHealth) ->inforedefinedStudy7
+
+
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/studyByClusterPlotH7redo.pdf", width = 13, height = 11)
+inforedefinedStudy7  %>%   
+  ggplot(aes(fill=experiment_title, y= n, x= RedefWeight7ClusterHealth)) +
+    ggtitle("Samples from each of 7 redo Healthy clusters by Study") +
+    geom_bar(position="stack", stat="identity")+
+          discrete_scale(aesthetics = "fill",
+               palette = function(x) c(StudyColors))+
+    scale_x_discrete(limits=c(2,3,4,5,6,7, "unClustered"),
+                     labels=labelVectorRedo7)
+dev.off()
+```
+
+```{r}
+#healthy
+meta_orderedH2 <- onlyHealthyEnterosMeta[match(rownames(as.matrix(myWeightUniHealthAdultsDM)), onlyHealthyEnterosMeta$SampleID), ]
+#549 donor samples
+meta_orderedH2$experiment_title <- factor(meta_orderedH2$experiment_title)
+meta_orderedH2$target_subfragment <- factor(meta_orderedH2$target_subfragment)
+meta_orderedH2$unNeighborWeight2ClusterHealth <- factor(meta_orderedH2$unNeighborWeight2ClusterHealth)
+
+adonic_resultH2 <- adonis2(
+                        myWeightUniHealthAdultsDM ~ experiment_title + target_subfragment + unNeighborWeight2ClusterHealth,
+                        data = meta_orderedH2,
+                        by = "margin")
+H2Adonis<-rownames_to_column(adonic_resultH2, "variable")
+write_tsv(H2Adonis, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/Health3ClusterAdonis_070626.tsv", quote = "none")
+
+meta_orderedH4 <- onlyHealthyEnterosMeta[match(rownames(as.matrix(myWeightUniHealthAdultsDM)), onlyHealthyEnterosMeta$SampleID), ]
+#556 donor samples
+meta_orderedH4$experiment_title <- factor(meta_orderedH4$experiment_title)
+meta_orderedH4$target_subfragment <- factor(meta_orderedH4$target_subfragment)
+meta_orderedH4$RedefWeight4ClusterHealth <- factor(meta_orderedH4$RedefWeight4ClusterHealth)
+
+adonic_result2H4 <- adonis2(
+                        myWeightUniHealthAdultsDM ~ experiment_title + target_subfragment + RedefWeight4ClusterHealth,
+                        data = meta_orderedH4,
+                        by = "margin")
+H4Adonis<-rownames_to_column(adonic_result2H4, "variable")
+write_tsv(H4Adonis, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/Health4redoClusterAdonis_051126.tsv", quote = "none")
+
+##Adonis H7
+meta_orderedH7 <- onlyHealthyEnterosMeta[match(rownames(as.matrix(myWeightUniHealthAdultsDM)), onlyHealthyEnterosMeta$SampleID), ]
+#556 donor samples
+meta_orderedH7$experiment_title <- factor(meta_orderedH7$experiment_title)
+meta_orderedH7$target_subfragment <- factor(meta_orderedH7$target_subfragment)
+meta_orderedH7$Weight7ClusterHealth <- factor(meta_orderedH7$Weight7ClusterHealth)
+
+adonic_result2H7 <- adonis2(
+                        myWeightUniHealthAdultsDM ~ experiment_title + target_subfragment + Weight7ClusterHealth,
+                        data = meta_orderedH7,
+                        by = "margin")
+H7Adonis<-rownames_to_column(adonic_result2H7, "variable")
+write_tsv(H7Adonis, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/HealtH7ClusterAdonis_051126.tsv", quote = "none")
+#best so far with 0.18 R2
+
+##Adonis H7redo
+meta_orderedH7redo <- onlyHealthyEnterosMeta[match(rownames(as.matrix(myWeightUniHealthAdultsDM)), onlyHealthyEnterosMeta$SampleID), ]
+#556 donor samples
+meta_orderedH7redo$experiment_title <- factor(meta_orderedH7redo$experiment_title)
+meta_orderedH7redo$target_subfragment <- factor(meta_orderedH7redo$target_subfragment)
+meta_orderedH7redo$RedefWeight7ClusterHealth <- factor(meta_orderedH7redo$RedefWeight7ClusterHealth)
+
+adonic_result2H7redo <- adonis2(
+                        myWeightUniHealthAdultsDM ~ experiment_title + target_subfragment + RedefWeight7ClusterHealth,
+                        data = meta_orderedH7redo,
+                        by = "margin")
+H7redoAdonis<-rownames_to_column(adonic_result2H7redo, "variable")
+write_tsv(H7redoAdonis, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/HealtH7redoClusterAdonis_051126.tsv", quote = "none")
+#0.16 R2
+```
+
+```{r}
+fullEubioTable %>% 
+  select(-SimpleID)->fullEubioTable
+myMeta %>%  
+  left_join(DysbioClusters, join_by(SampleID)) %>% 
+  left_join(EubioTable, join_by(SampleID)) %>% 
+  left_join(fullEubioTable, join_by(SampleID)) %>% 
+  left_join(HazletonEubioTable, join_by(SampleID))%>% 
+  left_join(KhannaKEubioTable, join_by(SampleID))%>% 
+  left_join(frickeEubioTable, join_by(SampleID))->FullFMTClusterMeta1
+
+FullFMTClusterMeta1%>%
+  mutate(SimpleID = coalesce(SimpleID.x, SimpleID.y)) %>% 
+  select(-SimpleID.x, - SimpleID.y)->FullFMTClusterMeta
+
+#write_tsv(FullFMTClusterMeta1, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/ReClusters3999_metaAnalysis_070626.tsv", quote = "none")
+
+#Just processing dysbio
+myMeta %>%  
+  left_join(DysbioClusters, join_by(SampleID))  ->DysbioFMTClusterMeta
+#write_tsv(DysbioFMTClusterMeta, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/Enterotyping/neighborDysCluster3999_metaAnalysis_063026.tsv", quote = "none")
+
+```
