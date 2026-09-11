@@ -1,0 +1,13 @@
+unNeighborClusters	variable	n	median	iqr
+1	NormedDelta	40	0.79	0.438
+2	NormedDelta	34	0.801	0.263
+3	NormedDelta	29	0.76	0.288
+4	NormedDelta	9	0.626	0.431
+5	NormedDelta	13	0.827	0.535
+6	NormedDelta	6	0.96	0.241
+7	NormedDelta	13	0.661	0.345
+8	NormedDelta	19	0.622	0.522
+9	NormedDelta	11	0.674	0.146
+10	NormedDelta	19	-1.222	4.714
+11	NormedDelta	5	0.632	0.09
+unClustered	NormedDelta	39	0.737	0.394

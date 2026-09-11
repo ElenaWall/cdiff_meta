@@ -1,0 +1,13 @@
+unNeighborClusters	variable	n	median	iqr
+1	deltaDistance	40	0.758	0.438
+2	deltaDistance	34	0.759	0.285
+3	deltaDistance	29	0.656	0.398
+4	deltaDistance	9	0.625	0.471
+5	deltaDistance	13	0.394	0.239
+6	deltaDistance	6	0.72	0.448
+7	deltaDistance	13	0.627	0.365
+8	deltaDistance	19	0.432	0.494
+9	deltaDistance	11	0.559	0.154
+10	deltaDistance	19	-0.305	0.655
+11	deltaDistance	5	0.38	0.052
+unClustered	deltaDistance	39	0.651	0.498
