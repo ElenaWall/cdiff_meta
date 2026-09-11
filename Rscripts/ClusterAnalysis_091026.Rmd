@@ -1,10 +1,15 @@
 ---
-title: "ClusterAnalysis_062926"
+title: "Cluster Analysis"
 output: html_document
-date: "2026-06-29"
+date: "2026-09-10"
 ---
 
-```{r, echo=FALSE}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r echo=FALSE}
+
 #cleaning
 library(broom)
 library(tidyverse)
@@ -56,8 +61,9 @@ library(viridis)
 
 library(grateful)
 
-cite_packages(output = "paragraph", out.dir = "~/Desktop/Lozupone_022425/Keith/Metaanalysis/")
+#cite_packages(output = "paragraph", out.dir = "~/Desktop/Lozupone_022425/Keith/Metaanalysis/")
 ```
+
 ```{r}
 labelVectorRedo <- setNames(c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, "unClustered"), c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "BTC"))
 
@@ -116,26 +122,33 @@ myFaith %>%
 ```
 
 
-1.)Phylogenetic Visualization
+#1.)Phylogenetic Visualization
+## Will create contribution tables and Taxa Bar plots
+#phyloseq drains computer, feed trash beforehand
 ```{r}
-#phyloseq drains computer, must feed trash
 qza_to_phyloseq(features ='~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics-OriginalMeta2-caseyFiltered-rared-1004/rarefied_table.qza',
                 taxonomy ='~/Desktop/Lozupone_022425/Keith/Metaanalysis/Keiths Original Files/taxonomy_silva.qza',
                 metadata = '~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ReClusters3999Dysbio_metaAnalysis_082926.tsv') -> phyloMetaSeq
 ```
+
+Use prep_mdf to agglomerate and normalize the phyloseq object, and melt to a data frame. Here we specify that NA values should be 
+removed with the remove_na parameter, which can be adjusted according to the needs of your visualization and analysis.
 ```{r}
-#readRDS("~/Lozupone/Keith/Metaanalysis/Manuscript/UpdatedData082826/phyloMetaSeq_080725", refhook = NULL)
-#Use prep_mdf to agglomerate and normalize the phyloseq object, and melt to a data frame. Here we specify that NA values should be 
-#removed with the remove_na parameter, which can be adjusted according to the needs of your visualization and analysis.
 prep_mdf(phyloMetaSeq) -> MetaSeqDF
-#write_tsv(MetaSeqDF,"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/AllBiomMetaSeqDF_090326", quote = "none")
-# Create abundance dataframe & color mapping dataframe
-#Use create_color_dfs to generate a color object for the specified data. Then extract the objects used to plot. mdf represents the #object to plot; cdf represents the coloring.
-#when using code from github, the selected groups didn't exist because I Keith used a SILVA classifier
-#to check Phylums present and how many instances of those Phylums
+write_tsv(MetaSeqDF,"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/AllBiomMetaSeqDF_090926", quote = "none")
+```
+Create abundance dataframe & color mapping dataframe
+Use create_color_dfs to generate a color object for the specified data. Then extract the objects used to plot. mdf represents the #object to plot; cdf represents the coloring.
+when using code from github, the selected groups didn't exist because Keith and I used a SILVA classifier in this study
+To check Phylums present and how many instances of those Phylums
+```{r}
 MetaSeqDF %>% 
-dplyr::count(Phylum)->phylumInfo
-#most common Phylums are 'Proteobacteria', 'Actinobacteria', 'Bacteroidetes', 'Firmicutes','Verrucomicrobia','Tenericutes', 'Fusobacteria', 'Lentisphaerae', 'Chloroflexi'
+dplyr::count(Phylum) %>% 
+  arrange(desc(n))->phylumInfo
+head(phylumInfo, 5)
+```
+
+```{r}
 MetaSeqDF %>% 
 create_color_dfs(selected_groups = c('Proteobacteria', 'Actinobacteria', 'Bacteroidetes', 'Firmicutes','Verrucomicrobia'),
                                   cvd = TRUE) -> colorObjs_Meta_Verruc
@@ -153,7 +166,7 @@ rm(phyloMetaSeq)
 ```
 
 this is taken directly from https://karstenslab.github.io/microshades/articles/remove_na_option.html
-```{r fig.height=10, fig.width=20}
+```{r}
 # Order the samples by Proteobacteria abundance for visual organization
 reorder_samples_by(mdf_Meta_Verruc, cdf_Meta_Verruc, 
                       order = "Proteobacteria", 
@@ -202,8 +215,9 @@ plot_microshades(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf) +
 
 plot_grid(diff_DysbioRe11, new_center_legend_horiz_redoDys11 , nrow=2, rel_widths = c(1,1), rel_heights = c(1,0.25)) ->DysbioRe11Diff
 DysbioRe11Diff
+```
 
-
+```{r, fig.width= 20, fig.height= 12}
 plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "1") -> DysbioRe11Contributions1
 plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "2") -> DysbioRe11Contributions2
 plot_contributions(new_groups2_redoDys11$mdf, new_groups2_redoDys11$cdf, "unNeighborClusters", "3") -> DysbioRe11Contributions3
@@ -229,7 +243,10 @@ DysbioRe11Contributions9$box +
 DysbioRe11Contributions10$box + 
 DysbioRe11Contributions11$box + 
 DysbioRe11ContributionsUnClus$box->conts11ReDysbio
+conts11ReDysbio
+```
 
+```{r echo = FALSE}
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/TaxaBar11NeighDysbioCluster_090126.pdf", width = 15, height = 12)
 DysbioRe11Diff
 dev.off()
@@ -266,7 +283,7 @@ DysbioRe11Box1 %>%
   full_join(DysbioRe11Box11) %>% 
   full_join(DysbioRe11BoxUnClus) ->DysbioRe11Box
 
-write_tsv(DysbioRe11Box, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysbioNeigh11TaxaAbund_090126.tsv",  quote = "none")
+write_tsv(DysbioRe11Box, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DysbioNeigh11TaxaAbund_090926.tsv",  quote = "none")
 
 rm(mdf_11UnNeighborClustersDysbio_Meta,mdf_Meta_Verruc,mdf_reordered_Meta,new_groups2_redoDys11,
    cdf_Meta_Verruc, cdf_reordered_Meta, colorObjs_Meta_Verruc,new_center_legend_horiz_redoDys11,
@@ -280,7 +297,7 @@ rm(mdf_11UnNeighborClustersDysbio_Meta,mdf_Meta_Verruc,mdf_reordered_Meta,new_gr
    DysbioRe11Contributions9,DysbioRe11Contributions10,DysbioRe11Contributions11,DysbioRe11ContributionsUnClus)
 
 ```
-alpha-diversity
+Summarizing alpha-diversity metrics
 ```{r}
 Dysbio11Colors<-read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/colorMatchDysbio11Neighbor_090126.tsv")
 
@@ -310,7 +327,7 @@ lessAlphas %>%
               medianShan = median(shannon_entropy),meanShan = mean(shannon_entropy), 
               minShan = min(shannon_entropy), maxShan = max(shannon_entropy),
               IQRShan = IQR(shannon_entropy), sdShan = sd(shannon_entropy))-> Dys11AlphaAvgs
-
+print(Dys11AlphaAvgs)
 write_tsv(Dys11AlphaAvgs, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11AlphaSumTable_090926.tsv", quote = "none")
 ```
 Looking into High Cluster 11 Faith PD
@@ -461,6 +478,8 @@ MetaSeqDF2 %>%
         legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->FigS8calt2
 FigS8calt2
 dev.off()
+FigS8balt4
+FigS8calt2
 ```
 Want to determine relative abundances of taxa that dominate clusters
 ```{r, fig.width=3.5, fig.height=11}
@@ -495,9 +514,8 @@ Re11AbundTable %>%
   ungroup()->ClusterTaxaGroupStats
 write_tsv(ClusterTaxaGroupStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Dysbio11NeighborTopGroupAbund_090926.tsv", quote = "none")
 
-
 ```
-
+plot those groups and show Faith PD
 ```{r, fig.width=10, fig.height=21}
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/TopTaxaByCluster_090926.pdf", width = 20, height = 12)
 ClusterTaxaGroupStats %>%
@@ -586,8 +604,8 @@ Re11AbundTable %>%
   ungroup()->TopAbunRe11
 ```
 
-
-Going back to using metadata categories for enterotyping, so will need to use the subsetted core-diversity metrics from the 
+Going back to using metadata categories for enterotyping and plotting PCoAs, 
+so will need to use the subsetted core-diversity metrics from the 
 ```{r}
 ##
 ## Unweighted All
@@ -617,10 +635,8 @@ myMeta %>%
   left_join(myShannon) %>% 
   left_join(myFaith) %>% 
   left_join(myEvenness)->fullerunWeightUniFullPcoa
-#write_tsv(fullerunWeightUniFullPcoa, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/070825_FilteredDataset/unweightedPC123withMeta.tsv", quote = "none")
-```
+write_tsv(fullerunWeightUniFullPcoa, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/unweightedPC123withMeta.tsv", quote = "none")
 
-```{r}
 #going to add Weighted PCoA data to each subset
 myWeightUniPcoaDysbio <-read_qza('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/core-metrics_MetaAnalysis_preFMT-1004/weighted_unifrac_pcoa_results.qza')$data
 #get axis info
@@ -650,8 +666,7 @@ fullerunWeightUniFullPcoa %>%
   left_join(DysbioClusters, join_by(SampleID)) ->metaUnWtUniFullSubWtPcoa
 
 ```
-want to map clustering info onto PCoA
-
+Plot mapping simple clustering info onto PCoA
 ```{r}
 #Dysbio Weight
 metaUnWtUniFullSubWtPcoa %>% 
@@ -675,7 +690,7 @@ Unweighted plots
 ```{r}
 ##Dysbio
 
-#11 redo
+#11
 metaUnWtUniFullSubWtPcoa%>% 
   ggplot(aes(PC1,PC2)) +
     theme_bw(base_size = 18) +
@@ -694,12 +709,10 @@ metaUnWtUniFullSubWtPcoa%>%
 print(dysbioRedo11)
 ```
 
+#Connect Dysbiosis Distance to Clusters and perform boxplot with stats
+##Determine where extreme DDs are
+##Make centroids
 ```{r}
-#Goals: Connect Dysbiosis Distance to Clusters and possible do boxplot with stats
-#Post DysbioDist~ Distinct Dysbio Cluster
-#Post DysbioDist~ Gradient Proteobacteria Rel. Abundance
-#change in DysbioDist based on Dysbio Cluster
-#DysbioDist ~ preCluster + donorCluster + (preClust*donorClust)
 dysbioDist <- read_tsv('~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/MetaSampleDysbioDistances_083126.tsv')
 
 #Attaching dysbio distances onto lotsa meta data
@@ -761,17 +774,18 @@ metaUnWtUniFullSubWtPcoaDD  %>%
   ungroup()-> DeltaStats
 write_tsv(DeltaStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDeltaStats_090926.tsv", quote ="none")
 ```
-stats/plots for pre filtering Clustered preFMT samples
-```{r, fig.width=18, fig.height=12}
+baseline stats/plots for pre filtering Clustered preFMT samples
+```{r echo = FALSE, fig.width=18, fig.height=12}
 metaUnWtUniFullSubWtPcoaDD  %>% 
   filter(unNeighborClusters != 'NA') %>% 
   kruskal.test(data = ., dysbiosis_dist~unNeighborClusters)->myDDClusterKruskal
-# data:  dysbiosis_dist  unNeighborClusters
-# Kruskal-Wallis chi-squared = 143.19, df = 11, p-value < 2.2e-16
+myDDClusterKruskal
+
 metaUnWtUniFullSubWtPcoaDD  %>% 
   filter(unNeighborClusters != 'NA') %>% 
   kruskal_effsize(data = ., dysbiosis_dist~unNeighborClusters)->DDClusterEffect
-#Large effect size when looking at full 305 eta2[H] = 0.4511488
+DDClusterEffect
+
 metaUnWtUniFullSubWtPcoaDD  %>% 
   filter(unNeighborClusters != 'NA') %>% 
   rstatix::dunn_test(data = ., dysbiosis_dist~unNeighborClusters, p.adjust.method = "BH",
@@ -862,6 +876,7 @@ BaseDDSignifPlot
   plot_layout(ncol = 2, widths = c(2.5, 1.5))->BaseDDBox
 BaseDDBox
 dev.off()
+BaseDDBox
 ```
 plot dysbio scores of clusters on pcoas
 ```{r, fig.width=8, fig.height=5}
@@ -942,7 +957,8 @@ metaUnWtUniFullSubWtPcoaDD %>%
                 legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->SuppUnWtUni
 SuppUnWtUni
 dev.off()
-
+Fig1WtUni
+SuppUnWtUni
 ```
 
 ```{r, fig.width=9, fig.height=11}
@@ -955,6 +971,7 @@ dev.off()
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Fig5_090926.pdf", width = 8.5, height = 11)
 Fig1
 dev.off()
+Fig1
 ```
 
 connect pre-postFMT. This looks at time course
@@ -979,15 +996,18 @@ allPrePostFMT %>%
   filter(n() > 1)%>% 
   filter(fmt_status == 'PreFMT') %>% 
   ungroup()-> TwoManyPre #subjects have multiple preFMT samples
+nrow(TwoManyPre)
 #44 have multiple pre
 TwoManyPre %>%
   group_by(study_hostID) %>% 
   filter(day_relative_to_fmt2 != max(day_relative_to_fmt2)) %>% 
   ungroup()->EarlyExtra 
+nrow(EarlyExtra)
 #20 early selected
 #KEEP everything EXCEPT EarlyExtras
 allPrePostFMT %>% 
   anti_join(EarlyExtra)->PrePostAfterFMT
+nrow(PrePostAfterFMT)
 #still have 2 pre samples from same patient and day
 PrePostAfterFMT %>%
   group_by(study_hostID, fmt_status) %>% 
@@ -1001,19 +1021,23 @@ TwoManyPre2  %>%
   ungroup()->doubleSample 
 PrePostAfterFMT %>%
   anti_join(doubleSample)->PrePostAfterFMT
+nrow(PrePostAfterFMT)
 #1128 remaining, but some have -1 in post
 PrePostAfterFMT %>%
   filter(fmt_status == 'PostFMT') %>% 
   filter(day_relative_to_fmt2 == -1)-> StrangePost
 PrePostAfterFMT %>% 
   anti_join(StrangePost)->PrePostAfterFMT
+nrow(PrePostAfterFMT)
 #1126 remaining, but some have NA for day relative to fmt
 PrePostAfterFMT %>% 
   filter(day_relative_to_fmt2 != "NA")->PrePostAfterFMT 
+nrow(PrePostAfterFMT)
 #1115 remaining
 #the sham FMT has to go
 PrePostAfterFMT  %>% 
   filter(study_hostID != 'Staley RI FMT trial_RSUB15')->PrePostAfterFMT
+nrow(PrePostAfterFMT)
 #1113 remaining
 PrePostAfterFMT %>% 
     group_by(study_hostID) %>% 
@@ -1021,6 +1045,7 @@ PrePostAfterFMT %>%
   ungroup()-> Unmatched 
 PrePostAfterFMT %>% 
   anti_join(Unmatched)->PrePostAfterFMT
+nrow(PrePostAfterFMT)
 #1111 remaining
 #this groups the post samples into bins, kinda like keiths
 PrePostAfterFMT %>% 
@@ -1043,6 +1068,7 @@ PrePostAfterFMT %>%
   summarise(has_both = n_distinct(fmt_status) == 2) %>%
   filter(has_both == TRUE) %>% 
   ungroup()->PreAddsUp
+print(PreAddsUp)
 #241 TRUE, 0 FALSE
 
 #count pre/post timepoints
@@ -1050,31 +1076,37 @@ PrePostAfterFMT  %>%
   group_by(fmt_status) %>% 
   dplyr::count(fmt_status) %>% 
   ungroup()->PrePostPatientNumber
+print(PrePostPatientNumber)
 #241 pre, 870 post
 
 rm(TwoManyPre,EarlyExtra,TwoManyPre2,doubleSample, StrangePost,PreAddsUp)
 ```
 Assuming very late days of sampling (drf 300-700) aren't going to tell us as much about FMT response. 
+Make 1:1 pre post matched data
 ```{r}
 #going to maintain the last one up to 90 days. Start by taking samples up to drf 90
 PrePostAfterFMT %>% 
   ungroup() %>% 
   filter(day_relative_to_fmt2 <= 90) ->  EarlyPrePostAfterFMT
 #986 samples before 90 days post/pre
+nrow(EarlyPrePostAfterFMT)
 EarlyPrePostAfterFMT %>% 
   group_by(study_hostID, fmt_status) %>% 
   filter(fmt_status == 'PostFMT') %>% 
   filter(n() > 1) %>% 
   ungroup()-> TwoManyEarlyPost
+nrow(TwoManyEarlyPost)
 #699 multiple post samples
 #save postFMT highest day rel. fmt
 TwoManyEarlyPost %>% 
   group_by(study_hostID) %>% 
   filter(day_relative_to_fmt2 != max(day_relative_to_fmt2)) %>% 
   ungroup()->earlyAfterPost
+nrow(earlyAfterPost)
 #506 earlier postFMT timepoints
 EarlyPrePostAfterFMT %>% 
   anti_join(earlyAfterPost)->EarlyLastPostFMT
+nrow(EarlyLastPostFMT)
 #480 objs, some of the subject IDs have multiple values from same day 
 EarlyLastPostFMT  %>% 
   group_by(study_hostID, fmt_status) %>% 
@@ -1091,6 +1123,7 @@ TwoManySamples %>%
 #KEEP everything EXCEPT randomExtras
 EarlyLastPostFMT %>% 
   anti_join(randomExtraEarly)->EarlyLastPostFMT
+nrow(EarlyLastPostFMT)
 #478...check that they are all matched
 EarlyLastPostFMT   %>% 
   group_by(study_hostID) %>%
@@ -1102,6 +1135,7 @@ EarlyLastPostFMT   %>%
   mutate(has_both = n_distinct(fmt_status) == 2) %>%
   filter(has_both == TRUE) %>% 
   ungroup()->PreEarlyPostMatchedFMT
+nrow(PreEarlyPostMatchedFMT)
 #474 remaining
 PreEarlyPostMatchedFMT %>%
       mutate(RangePostBin = case_when(fmt_status == "PostFMT" & between(day_relative_to_fmt2, 0,14) ~ "halfMonth",
@@ -1123,10 +1157,11 @@ PrePostMatchedFMT  %>%
   summarise(has_both = n_distinct(fmt_status) == 2) %>%
   filter(has_both == FALSE) %>% 
   ungroup()->matching
-
+print(matching)
 #count post timepoints for each study_hostID
 PrePostMatchedFMT %>% 
   dplyr::count(study_hostID)->numberPatientPost
+print(numberPatientPost)
 #237 patients
 PrePostMatchedFMT %>% 
   group_by(fmt_status) %>%
@@ -1134,7 +1169,7 @@ PrePostMatchedFMT %>%
 
 rm(TwoManyEarlyPost,earlyAfterPost,EarlyLastPostFMT,TwoManySamples,randomExtraEarly ,checkEarlyLastPost,matching)
 ```
-
+Need to have Delta Distances for response analysis
 ```{r}
 #calculate delta dysbio distance, There will be a distinct delta for each post
 PrePostAfterFMT %>% 
@@ -1182,16 +1217,16 @@ normDistDiffPrePostMatchFMT  %>%
   get_summary_stats(deltaDistance, type = "median_iqr") %>% 
   ungroup()-> DeltaStats
 write_tsv(DeltaStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDeltaStats_090926.tsv", quote ="none")
-
+print(DeltaStats)
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% 
   group_by(unNeighborClusters) %>%
   get_summary_stats(NormedDelta, type = "median_iqr") %>% 
   ungroup()-> NormDDStats
 write_tsv(NormDDStats, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterNormDDStats_090926.tsv", quote ="none")
-
+print(NormDDStats)
 ```
-boxplots
+Boxplots with matched samples and change analysis
 ```{r}
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterDysDistResponsePlots_090926.pdf", width = 11, height = 8.5)
 #boxplot of matched pre to post DysBio Dist
@@ -1209,20 +1244,19 @@ PrePostMatchedFMT  %>%
         discrete_scale(aesthetics = "fill",
                palette = function(x) c(DysbioColors),
                labels = c("1","2","3","4","5","6","7","8","9","10","11", "BTC"))+
-                 scale_x_discrete(limits=c("PreFMT","PostFMT"))
+                 scale_x_discrete(limits=c("PreFMT","PostFMT"))->FullChange
 
 #dys dist for matched patients FMT plots/stats
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   kruskal.test(data = ., dysbiosis_dist ~ unNeighborClusters)->my237DysDistClusterKruskal
+print(my237DysDistClusterKruskal)
 
-# data:  dysbiosis_dist by unNeighborClusters
-# Kruskal-Wallis chi-squared = 108.1, df = 11, p-value < 2.2e-16
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   kruskal_effsize(data = ., dysbiosis_dist ~ unNeighborClusters)->my237DysDistEffect
-#0.4315352
 
+print(my237DysDistEffect)
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   dunn_test(data = ., dysbiosis_dist ~ unNeighborClusters, p.adjust.method = "BH",
@@ -1332,12 +1366,13 @@ BaseDDSig237Plot
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   kruskal.test(data = ., deltaDistance~unNeighborClusters)->mydeltaClusterKruskal
-# data:  deltaDistance by unNeighborClusters
-# Kruskal-Wallis chi-squared = 69.998, df = 11, p-value = 1.223e-10
+print(mydeltaClusterKruskal)
+
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   kruskal_effsize(data = ., deltaDistance~unNeighborClusters)->my237DeltaDistEffect
-#0.2622119
+print(my237DeltaDistEffect)
+
 normDistDiffPrePostMatchFMT  %>% 
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>% 
@@ -1457,13 +1492,14 @@ normDistDiffPrePostMatchFMT  %>%
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>%#237 obs
   kruskal.test(data = ., NormedDelta~unNeighborClusters)->myNormDDClusterKruskal
-# data:  NormedDelta by unNeighborClusters
-# Kruskal-Wallis chi-squared = 50.558, df = 11, p-value = 4.968e-07
+print(myNormDDClusterKruskal)
+
 normDistDiffPrePostMatchFMT  %>% 
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>%#237 obs
   kruskal_effsize(data = ., NormedDelta~unNeighborClusters)->my237NormDDEffect
-#0.1758116
+print(my237NormDDEffect
+      )#0.1758116
 normDistDiffPrePostMatchFMT  %>% 
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>% 
@@ -1583,7 +1619,10 @@ normDistDiffPrePostMatchFMT  %>%
         legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->NormDDScatter
 NormDDScatter
 dev.off()
+
+FullChange
 ```
+
 ```{r, fig.width=25, fig.height=18}
 ((matchedDysDistNoBar) | BaseDDSig237Plot)+
   plot_layout(ncol = 2, widths = c(2.5, 1))->s7a
@@ -1600,13 +1639,16 @@ wrap_plots(s7a,s7b, SuppUnWtUni, s7d)->altSuppFig7
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig7_090926.pdf", width = 15, height = 12)
 altSuppFig7
 dev.off()
+altSuppFig7
 ```
+
 ```{r, fig.width=15, fig.height=12}
 (matchedDysDistBox | matchedDeltaBox) / (SuppUnWtUni | normDDBox)->Fig7
 
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig72_090926.pdf", width = 15, height = 12)
 Fig7
 dev.off()
+Fig7
 ```
 
 ```{r}
@@ -1616,13 +1658,14 @@ normDistDiffPrePostMatchFMT  %>%
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   kruskal.test(data = ., FaithPD ~ unNeighborClusters)->my237DysFaithKruskal
-# data:  FaithPD by unNeighborClusters
-# Kruskal-Wallis chi-squared = 118.45, df = 11, p-value < 2.2e-16
+print(my237DysFaithKruskal)
+
 normDistDiffPrePostMatchFMT  %>% 
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   kruskal_effsize(data = ., FaithPD ~ unNeighborClusters)->my237DysFaithEffect
-#0.4775443
+print(my237DysFaithEffect)
+
 normDistDiffPrePostMatchFMT  %>% 
   filter(fmt_status == 'PreFMT') %>% #237 obs
   dunn_test(data = ., FaithPD ~ unNeighborClusters, p.adjust.method = "BH", 
@@ -1737,6 +1780,7 @@ dev.off()
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig8_090926.pdf", width = 15, height = 12)
 SuppFig8
 dev.off()
+SuppFig8
 ```
 
 
@@ -1779,7 +1823,7 @@ infoPreSubFrag  %>%
         axis.text.y = element_text(size = 12),
         plot.title = element_text( size = 18),
         plot.subtitle = element_text( size = 16),
-        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->subFrag237
 
 infoPreStudy  %>%   
   ggplot(aes(fill=experiment_title, y= n, x= unNeighborClusters)) +
@@ -1795,9 +1839,10 @@ infoPreStudy  %>%
         axis.text.y = element_text(size = 12),
         plot.title = element_text( size = 18),
         plot.subtitle = element_text( size = 16),
-        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->study237
 dev.off()
-
+subFrag237
+study237
 
 StudyDataPre<- table(PreMatchedData$unNeighborClusters, PreMatchedData$experiment_title)
 resultStudyPre <- chisq.test(StudyDataPre)
@@ -1822,35 +1867,6 @@ normDistDiffPrePostMatchFMT %>%
   ungroup() %>% 
     lmer(dysbiosis_dist~ day_relative_to_fmt2 + (1|study_hostID),REML=FALSE, data = .)-> LongMENull_model
 summary(LongMENull_model)
-# Linear mixed model fit by maximum likelihood . t-tests use Satterthwaite's method ['lmerModLmerTest']
-# Formula: dysbiosis_dist ~ day_relative_to_fmt2 + (1 | study_hostID)
-#    Data: .
-# 
-#       AIC       BIC    logLik -2*log(L)  df.resid 
-#     203.8     220.4     -97.9     195.8       468 
-# 
-# Scaled residuals: 
-#     Min      1Q  Median      3Q     Max 
-# -2.5183 -0.9222 -0.1844  0.8239  2.2913 
-# 
-# Random effects:
-#  Groups       Name        Variance Std.Dev.
-#  study_hostID (Intercept) 0.00000  0.0000  
-#  Residual                 0.08865  0.2977  
-# Number of obs: 472, groups:  study_hostID, 236
-# 
-# Fixed effects:
-#                       Estimate Std. Error        df t value Pr(>|t|)    
-# (Intercept)          3.057e-01  1.660e-02 4.720e+02   18.42   <2e-16 ***
-# day_relative_to_fmt2 7.930e-03  5.351e-04 4.720e+02   14.82   <2e-16 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# Correlation of Fixed Effects:
-#             (Intr)
-# dy_rltv_t_2 -0.564
-# optimizer (nloptwrap) convergence code: 0 (OK)
-# boundary (singular) fit: see help('isSingular')
 
 normDistDiffPrePostMatchFMT %>%
   group_by(study_hostID) %>%
@@ -1861,39 +1877,6 @@ normDistDiffPrePostMatchFMT %>%
   ungroup() %>% 
     lmer(dysbiosis_dist~ day_relative_to_fmt2 + unNeighborClusters + (1|study_hostID), data = .)-> LongMENoIntX_model
 summary(LongMENoIntX_model)
-# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
-# Formula: dysbiosis_dist ~ day_relative_to_fmt2 + unNeighborClusters +      (1 | study_hostID)
-#    Data: .
-# 
-# REML criterion at convergence: 220.5
-# 
-# Scaled residuals: 
-#     Min      1Q  Median      3Q     Max 
-# -2.6574 -0.7931 -0.1715  0.8161  2.3489 
-# 
-# Random effects:
-#  Groups       Name        Variance Std.Dev.
-#  study_hostID (Intercept) 0.00000  0.00    
-#  Residual                 0.08411  0.29    
-# Number of obs: 472, groups:  study_hostID, 236
-# 
-# Fixed effects:
-#                                 Estimate Std. Error         df t value Pr(>|t|)    
-# (Intercept)                    2.381e-01  3.371e-02  4.590e+02   7.063 6.09e-12 ***
-# day_relative_to_fmt2           8.068e-03  5.234e-04  4.590e+02  15.416  < 2e-16 ***
-# unNeighborClusters2            2.912e-02  4.784e-02  4.590e+02   0.609 0.542990    
-# unNeighborClusters3            1.243e-02  5.004e-02  4.590e+02   0.248 0.803913    
-# unNeighborClusters4           -4.459e-02  7.566e-02  4.590e+02  -0.589 0.555942    
-# unNeighborClusters5            2.376e-01  6.549e-02  4.590e+02   3.628 0.000318 ***
-# unNeighborClusters6            1.155e-01  8.983e-02  4.590e+02   1.286 0.199241    
-# unNeighborClusters7            1.595e-02  6.547e-02  4.590e+02   0.244 0.807652    
-# unNeighborClusters8            1.128e-01  5.718e-02  4.590e+02   1.972 0.049215 *  
-# unNeighborClusters9            4.958e-02  6.982e-02  4.590e+02   0.710 0.477983    
-# unNeighborClusters10           2.583e-01  5.715e-02  4.590e+02   4.520 7.89e-06 ***
-# unNeighborClusters11           1.386e-01  9.731e-02  4.590e+02   1.424 0.155021    
-# unNeighborClustersunClustered  5.686e-02  4.646e-02  4.590e+02   1.224 0.221642    
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
 normDistDiffPrePostMatchFMT %>%
   group_by(study_hostID) %>%
@@ -1909,50 +1892,6 @@ as.data.frame(summary(LongMENeighbor_model)$coefficients) %>%
 
  write_tsv(DRFXClusterRTb, "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFXCluster_090926.tsv", quote = "none")
 
-
-# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
-# Formula: dysbiosis_dist ~ day_relative_to_fmt2 * unNeighborClusters +      (1 | study_hostID)
-#    Data: .
-# REML criterion at convergence: 301.6
-# Scaled residuals: 
-#     Min      1Q  Median      3Q     Max 
-# -2.6560 -0.7383 -0.1967  0.8062  2.4685 
-# 
-# Random effects:
-#  Groups       Name        Variance Std.Dev.
-#  study_hostID (Intercept) 0.00000  0.0000  
-#  Residual                 0.08032  0.2834  
-# Number of obs: 470, groups:  study_hostID, 235
-# 
-# Fixed effects:
-#                                                      Estimate Std. Error         df t value Pr(>|t|)    
-# (Intercept)                                         2.092e-01  3.842e-02  4.460e+02   5.446 8.51e-08 ***
-# day_relative_to_fmt2                                9.705e-03  1.234e-03  4.460e+02   7.868 2.75e-14 ***
-# unNeighborClusters2                                 1.826e-02  5.627e-02  4.460e+02   0.324 0.745723    
-# unNeighborClusters3                                 3.632e-02  6.028e-02  4.460e+02   0.603 0.547090    
-# unNeighborClusters4                                -1.288e-02  8.955e-02  4.460e+02  -0.144 0.885678    
-# unNeighborClusters5                                 2.855e-01  7.656e-02  4.460e+02   3.729 0.000217 ***
-# unNeighborClusters6                                 1.381e-01  1.076e-01  4.460e+02   1.284 0.199746    
-# unNeighborClusters7                                 7.316e-02  7.637e-02  4.460e+02   0.958 0.338647    
-# unNeighborClusters8                                 1.292e-01  6.740e-02  4.460e+02   1.917 0.055825 .  
-# unNeighborClusters9                                 7.788e-02  8.292e-02  4.460e+02   0.939 0.348089    
-# unNeighborClusters10                                4.663e-01  6.891e-02  4.460e+02   6.767 4.15e-11 ***
-# unNeighborClusters11                                1.931e-01  1.210e-01  4.460e+02   1.596 0.111141    
-# unNeighborClustersunClustered                       7.433e-02  5.531e-02  4.460e+02   1.344 0.179693    
-# day_relative_to_fmt2:unNeighborClusters2            7.082e-04  1.816e-03  4.460e+02   0.390 0.696686    
-# day_relative_to_fmt2:unNeighborClusters3           -1.395e-03  1.836e-03  4.460e+02  -0.760 0.447800    
-# day_relative_to_fmt2:unNeighborClusters4           -1.787e-03  2.674e-03  4.460e+02  -0.668 0.504417    
-# day_relative_to_fmt2:unNeighborClusters5           -2.110e-03  2.991e-03  4.460e+02  -0.706 0.480851    
-# day_relative_to_fmt2:unNeighborClusters6           -1.373e-03  2.779e-03  4.460e+02  -0.494 0.621572    
-# day_relative_to_fmt2:unNeighborClusters7           -3.361e-03  2.490e-03  4.460e+02  -1.350 0.177781    
-# day_relative_to_fmt2:unNeighborClusters8           -7.061e-04  2.629e-03  4.460e+02  -0.269 0.788431    
-# day_relative_to_fmt2:unNeighborClusters9           -1.609e-03  2.509e-03  4.460e+02  -0.641 0.521636    
-# day_relative_to_fmt2:unNeighborClusters10          -1.348e-02  2.565e-03  4.460e+02  -5.253 2.32e-07 ***
-# day_relative_to_fmt2:unNeighborClusters11          -2.775e-03  3.402e-03  4.460e+02  -0.816 0.415145    
-# day_relative_to_fmt2:unNeighborClustersunClustered -1.002e-03  1.780e-03  4.460e+02  -0.563 0.573835    
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
  normDistDiffPrePostMatchFMT %>%
   group_by(study_hostID) %>%
     filter(day_relative_to_fmt2 > -89) %>% 
@@ -1963,6 +1902,7 @@ as.data.frame(summary(LongMENeighbor_model)$coefficients) %>%
     lmer(dysbiosis_dist~ day_relative_to_fmt2 + unNeighborClusters + (1|study_hostID), REML=FALSE, data = .)-> LongMENoIntX_model2
  
 anova(LongMENull_model,LongMENoIntX_model2)->aovCluster
+print(aovCluster)
  write_tsv(aovCluster %>% 
               rownames_to_column("Model"),"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFandClusterAOV_090926.tsv", quote = "none")
 
@@ -1976,6 +1916,7 @@ normDistDiffPrePostMatchFMT %>%
     lmer(dysbiosis_dist~ day_relative_to_fmt2 * unNeighborClusters + (1|study_hostID),REML=FALSE,data = .)-> LongMENeighbor_model2
 
 anova(LongMENoIntX_model2, LongMENeighbor_model2)->aovDRFxCluster
+print(aovDRFxCluster)
 write_tsv(aovDRFxCluster %>% 
              rownames_to_column("Model"), "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/DRFXClusterAOV_090126.tsv", quote = "none")
 
@@ -2114,34 +2055,14 @@ as.data.frame(summary(LongMEFaithIntX_model)$coefficients) %>%
     lmer(FaithPD~ day_relative_to_fmt2 * unNeighborClusters + (1|study_hostID), REML=FALSE, data = .)->LongMEFaithIntX_model2
 
 anova(FaithNull_model,LongMEFaithNoIntX_model2)->aovFaithCluster
+summary(aovFaithCluster)
 
-# Data: .
-# Models:
-# FaithNull_model: FaithPD ~ day_relative_to_fmt2 + (1 | study_hostID)
-# LongMEFaithNoIntX_model2: FaithPD ~ day_relative_to_fmt2 + unNeighborClusters + (1 | study_hostID)
-#                          npar    AIC  BIC  logLik -2*log(L)  Chisq Df Pr(>Chisq)    
-# FaithNull_model             4 3736.3 3753 -1864.2    3728.3                         
-# LongMEFaithNoIntX_model2   15 3560.7 3623 -1765.3    3530.7 197.66 11  < 2.2e-16 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
  write_tsv(aovFaithCluster %>% 
               rownames_to_column("Model"),"~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/FaithDRFandClusterAOV_090926.tsv", quote = "none")
 anova(LongMEFaithNoIntX_model2, LongMEFaithIntX_model2)->aovDRFxClusterFaith
+summary(aovDRFxClusterFaith)
   write_tsv(aovDRFxClusterFaith %>% 
                rownames_to_column("Model"), "~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/FaithDRFXClusterAOV_090926.tsv", quote = "none")
-
-# Data: .
-# Models:
-# LongMEFaithNoIntX_model2: FaithPD ~ day_relative_to_fmt2 + unNeighborClusters + (1 | study_hostID)
-# LongMEFaithIntX_model2: FaithPD ~ day_relative_to_fmt2 * unNeighborClusters + (1 | study_hostID)
-#                          npar    AIC  BIC  logLik -2*log(L)  Chisq Df Pr(>Chisq)    
-# LongMEFaithNoIntX_model2   15 3560.7 3623 -1765.3    3530.7                         
-# LongMEFaithIntX_model2     26 3388.9 3497 -1668.5    3336.9 193.76 11  < 2.2e-16 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
-
-
 
 # Multiple Test Correction with least square means in mixed models
 TrendsFaithIntX <- emtrends(LongMEFaithIntX_model, "unNeighborClusters", var = "day_relative_to_fmt2")
@@ -2316,6 +2237,7 @@ dev.off()
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/Supp_Fig9_090926.pdf", width = 15, height = 12)
 FiS9
 dev.off()
+FiS9
 ```
 
 ```{r, fig.width=15, fig.height=12}
@@ -2324,6 +2246,7 @@ DDFacetModel / FaithFacetModel->AltFig6
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/AltFig6_090926.pdf", width = 15, height = 12)
 AltFig6
 dev.off()
+AltFig6
 ```
 
 
@@ -2406,7 +2329,7 @@ dev.off()
 ```
 
 Keith wants to know if rCDI varies from initial CDI in response
-```{r}
+```{r, fig.width=11, fig.height=8.5}
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/CamachoClusterModels.pdf", width = 11, height = 8.5)
 normDistDiffPrePostMatchFMT %>%
   filter(experiment_title == "Initial FMT") %>% 
@@ -2462,13 +2385,14 @@ normDistDiffPrePostMatchFMT  %>%
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>%#237 obs
   kruskal.test(data = ., NormedDelta~experiment_title)->myNormStudyKruskal
-# data:  NormedDelta by unNeighborClusters
-# Kruskal-Wallis chi-squared = 50.558, df = 11, p-value = 4.968e-07
+print(myNormStudyKruskal)
+
 normDistDiffPrePostMatchFMT  %>% 
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>%#237 obs
   kruskal_effsize(data = ., NormedDelta~experiment_title)->myNormStudyEffect
-#0.238
+print(myNormStudyEffect)
+
 normDistDiffPrePostMatchFMT  %>% 
   ungroup() %>% 
   filter(fmt_status == 'PreFMT') %>% 
@@ -2530,6 +2454,7 @@ normStudySigPlot
 ((normStudyBoxNoBar) | normStudySigPlot)+
   plot_layout(ncol = 2, widths = c(2.5, 1))->studyBox
 dev.off()
+studyBox
 ```
 
 ```{r}
