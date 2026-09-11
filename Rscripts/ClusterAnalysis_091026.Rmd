@@ -97,7 +97,7 @@ FullFMTClusterMeta$unNeighborClusters<- factor(
 FullFMTClusterMeta$unNeighborClusters, levels = c(labelVectorRedo))
 
 #this is just clustering meta-data
-DysbioClusters<- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/11w5DysbioClusters_082926.tsv")
+DysbioClusters<- read_tsv("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/gitTSVs/11w5DysbioClusters_082926.tsv")
 DysbioClusters$unNeighborClusters<- factor(
 DysbioClusters$unNeighborClusters, levels = c(labelVectorRedo))
 
@@ -342,6 +342,10 @@ MetaSeqDF2 %>%
   group_by(study_hostID) %>% 
   fill(SimpleID, .direction = "downup") %>% 
    pull(SimpleID, name = study_hostID)->SimpleLabels
+
+MetaSeqDF %>%
+  rename("SampleID" = Sample) %>% 
+  unite("group", Phylum, Genus, sep = "-", remove = FALSE)->ClusteredMetaSeqDF
 
 Phyla_colors <- setNames(Dysbio11Colors$hex, Dysbio11Colors$Top_Phylum)
 
@@ -2249,6 +2253,1153 @@ dev.off()
 AltFig6
 ```
 
+```{r}
+MetaSeqDF %>%
+  filter(fmt_status != "missing"& fmt_status != "vanco" & fmt_status != "PostFMT-sham") %>% 
+  group_by(fmt_status, Phylum) %>% 
+  summarize(mean_value = mean(Abundance)) %>%
+  mutate(proportion = mean_value / sum(mean_value),
+         percentage = round(proportion * 100, 1),
+         high_prop = case_when(proportion < 0.03 ~ "Low_Prop",
+                               TRUE ~ Phylum)) %>% 
+  ungroup() %>% 
+  ggplot(aes(y= proportion, x= "", fill = high_prop)) +
+  scale_fill_viridis( direction=-1, discrete = TRUE, na.value = "grey50")+
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  facet_wrap(~fmt_status)
+    theme(legend.position = "none")
+```
+
+```{r, fig.width=12, fig.height=15}
+#1
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "1") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "1") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 1 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster1PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "1") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta >0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "1") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 1 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster1PrePostComp2
+#2  
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "2") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "2") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 2 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster2PrePostComp2
+ #3   
+      normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "3") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "3") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 3 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster3PrePostComp
+      
+        normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "3") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "3") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 3 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster3PrePostComp2
+#4        
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "4") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "4") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 4 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster4PrePostComp2
+ #5
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "5") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "5") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 5 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster5PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "5") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "5") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 5 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster5PrePostComp2
+#6
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "6") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "6") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 6 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster6PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "6") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "6") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 6 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster6PrePostComp2
+
+ #7 
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "7") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "7") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 7 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster7PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "7") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "7") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 7 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster7PrePostComp2
+#8
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "8") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "8") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 8 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster8PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "8") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "8") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 8 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster8PrePostComp2
+  
+  #9
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "9") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "9") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 9 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster9PrePostComp2
+  
+  #10
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "10") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "10") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 10 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster10PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "10") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "10") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 10 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster10PrePostComp2
+  
+  #11
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "11") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "11") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 11 (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster11PrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "11") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "11") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in 11 (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->Cluster11PrePostComp2
+  
+#BTC
+    normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "unClustered") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta < 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta < 0) %>% 
+  filter(unNeighborClusters == "unClustered") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in BTC (NormedDelta <0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->ClusterUncPrePostComp
+
+  normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "unClustered") %>% 
+  ggplot(aes(y= Abundance, x= study_hostID, fill = Phylum)) +
+  geom_col(identity = "stack") +
+  theme_bw(base_size = 18) +
+  coord_polar(theta = "y") +
+  ggtitle("Abundances Of Norm Delta > 0") +
+  geom_col()+
+    facet_wrap(~fmt_status)+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_blank(),
+            axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position="none",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))+
+normDistDiffPrePostMatchFMT %>% 
+  select(SampleID,NormedDelta) %>% 
+  right_join(ClusteredMetaSeqDF) %>% 
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+  ungroup() %>% 
+  filter(NormedDelta > 0) %>% 
+  filter(unNeighborClusters == "unClustered") %>% 
+  group_by(unNeighborClusters, study_hostID, day_relative_to_fmt2, Phylum, Genus) %>% 
+  summarise(diversity = n_distinct(OTU)) %>% 
+  ungroup() %>% 
+  filter(day_relative_to_fmt2 <= 90) %>% 
+  #filter(diversity > 2) %>% 
+  ggplot(aes(y= diversity, x= day_relative_to_fmt2, fill = Phylum)) +
+  theme_bw(base_size = 18) +
+  ggtitle("Phyla Richness after FMT in BTC (NormedDelta >0") +
+  geom_col()+
+    facet_grid(row = vars(study_hostID))+
+      scale_fill_manual(values = Phyla_colors)+
+      theme(axis.text.x = element_text(angle = 300, hjust = 0),
+        axis.title.x = element_text(size = 16),
+        legend.position="bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        legend.margin = margin(t = 0, b = 0, r = 0, l = 0))->ClusterUncPrePostComp2
+```
+
+```{r, fig.width=15, fig.height=20}
+pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterAllDynamics_091126.pdf", width = 15, height = 12)
+Cluster1PrePostComp / Cluster1PrePostComp2->Cluster1Dynamics
+Cluster1Dynamics
+
+Cluster2PrePostComp2
+
+Cluster3PrePostComp / Cluster3PrePostComp2->Cluster3Dynamics
+Cluster3Dynamics
+
+Cluster4PrePostComp2
+
+Cluster5PrePostComp / Cluster5PrePostComp2->Cluster5Dynamics
+Cluster5Dynamics
+
+Cluster6PrePostComp / Cluster6PrePostComp2->Cluster6Dynamics
+Cluster6Dynamics
+
+Cluster7PrePostComp / Cluster7PrePostComp2->Cluster7Dynamics
+Cluster7Dynamics
+
+Cluster8PrePostComp / Cluster8PrePostComp2->Cluster8Dynamics
+Cluster8Dynamics
+
+Cluster9PrePostComp2
+
+Cluster10PrePostComp / Cluster10PrePostComp2->Cluster10Dynamics
+Cluster10Dynamics
+
+Cluster11PrePostComp / Cluster11PrePostComp2->Cluster11Dynamics
+Cluster11Dynamics
+
+ClusterUncPrePostComp / ClusterUncPrePostComp2->ClusterUncDynamics
+ClusterUncDynamics
+dev.off()
+
+Cluster1Dynamics
+Cluster2PrePostComp2
+Cluster3Dynamics
+Cluster4PrePostComp2
+Cluster5Dynamics
+Cluster6Dynamics
+Cluster7Dynamics
+Cluster8Dynamics
+Cluster9PrePostComp2
+Cluster10Dynamics
+Cluster11Dynamics
+ClusterUncDynamics
+```
 
 ```{r}
 pdf("~/Desktop/Lozupone_022425/Keith/Metaanalysis/metaManuscript/UpdatedData082826/ClusterOtherPlots_090926.pdf", width = 11, height = 8.5)
