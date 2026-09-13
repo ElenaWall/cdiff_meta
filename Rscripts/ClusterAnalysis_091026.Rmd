@@ -2271,6 +2271,21 @@ MetaSeqDF %>%
   facet_wrap(~fmt_status)
     theme(legend.position = "none")
 ```
+How much Peptostreptococcaceae g. Clostridioides (monotypic genus) in each cluster and how does it change after FMT
+```{r}
+MetaSeqDF %>%
+  unite("study_hostID", experiment_title, host_subject_id, sep = "_", remove = FALSE) %>% 
+  group_by(study_hostID) %>% 
+  fill(unNeighborClusters, .direction = "downup") %>%
+    ungroup() %>% 
+    filter(unNeighborClusters != "NA" & fmt_status != "PostFMT-sham") %>% 
+    rename("SampleID" = Sample) %>% 
+  filter(Genus == "Clostridioides") %>% 
+  ggplot(aes(y= Abundance, x= unNeighborClusters, fill = experiment_title)) +
+  geom_col(identity = "stack") +
+   scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11","unClustered"))+
+  facet_wrap(~fmt_status)
+```
 
 ```{r, fig.width=12, fig.height=15}
 #1
